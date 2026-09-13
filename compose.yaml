@@ -1,0 +1,16 @@
+services:
+  archer:
+    build:
+      context: .
+      target: base
+    working_dir: /output
+    environment:
+      ARCHER_ROOT: /repo
+    volumes:
+      - ${ARCHER_REPO:-.}:/repo:ro
+      - ./artifacts:/output
+  test:
+    build:
+      context: .
+      target: test
+    working_dir: /app
