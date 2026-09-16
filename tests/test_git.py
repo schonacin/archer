@@ -24,15 +24,16 @@ def repo(tmp_path):
     return tmp_path
 
 
-def test_commit_index_worktree_are_distinct_and_readonly(repo):
+@pytest.mark.parametrize("parser", ["rust", "libcst"])
+def test_commit_index_worktree_are_distinct_and_readonly(repo, parser):
     (repo / "a.py").write_text("def staged(): pass\n")
     git(repo, "add", "a.py")
     (repo / "a.py").write_text("def unstaged(): pass\n")
     (repo / "new.py").write_text("import a\n")
     (repo / "gone.py").unlink()
     status = git(repo, "status", "--porcelain")
-    head, index = pair(repo, mode="staged")
-    index2, worktree = pair(repo, mode="unstaged")
+    head, index = pair(repo, mode="staged", parser=parser)
+    index2, worktree = pair(repo, mode="unstaged", parser=parser)
     assert "a.first" in head.nodes
     assert "a.staged" in index.nodes and index.to_json() == index2.to_json()
     assert "a.unstaged" in worktree.nodes and "new" in worktree.nodes
@@ -69,3 +70,64 @@ def test_deep_file_diagnostics_across_snapshots(repo):
         assert graph.metadata["diagnostics"][0]["file"] == "bad.py"
         assert graph.metadata["diagnostics"][0]["stage"] == "complexity"
         graph.validate()
+
+
+@pytest.mark.parametrize("parser", ["rust", "libcst"])
+def test_cache_reuses_callers_but_resolves_each_snapshot(repo, tmp_path_factory, monkeypatch, parser):
+    import importlib
+
+    from archer.scan.cache import cache_info
+
+    directory = tmp_path_factory.mktemp("git-facts")
+    (repo / "old.py").write_text("class Old:\n def run(self): pass\n")
+    (repo / "new.py").write_text("class New:\n def run(self): pass\n")
+    (repo / "facade.py").write_text("from old import Old as Base\n")
+    (repo / "caller.py").write_text(
+        "from facade import Base\nclass Child(Base):\n def work(self): self.run()\n"
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "old base")
+    first = git(repo, "rev-parse", "HEAD")
+    before = snapshot(repo, first, parser=parser, cache_dir=directory)
+    assert any(e.source == "caller.Child.work" and e.target == "old.Old.run" for e in before.edges)
+    (repo / "facade.py").write_text("from new import New as Base\n")
+    git(repo, "add", "facade.py")
+    git(repo, "commit", "-m", "new base; unchanged caller")
+
+    scanner = importlib.import_module("archer.scan")
+    original = scanner.get_parser
+    extracted = []
+
+    def tracking(name):
+        extract = original(name)
+
+        def call(source, module, file):
+            extracted.append(file)
+            return extract(source, module, file)
+
+        return call
+
+    monkeypatch.setattr(scanner, "get_parser", tracking)
+    after = snapshot(repo, "HEAD", parser=parser, cache_dir=directory)
+    assert extracted == ["facade.py"]
+    assert any(e.source == "caller.Child.work" and e.target == "new.New.run" for e in after.edges)
+    entries = cache_info(directory)["entries"]
+
+    # Index and worktree share unchanged blobs while reflecting renames/deletions.
+    git(repo, "mv", "caller.py", "renamed.py")
+    (repo / "gone.py").unlink()
+    status = git(repo, "status", "--porcelain")
+    for mode in ("staged", "unstaged", "worktree"):
+        cached = pair(repo, mode=mode, parser=parser, cache_dir=directory)
+        uncached = pair(repo, mode=mode, parser=parser, cache=False)
+        assert [g.to_dict() for g in cached] == [g.to_dict() for g in uncached]
+        assert diff(*cached).to_dict() == diff(*uncached).to_dict()
+    assert cache_info(directory)["entries"] > entries
+    assert git(repo, "status", "--porcelain") == status
+    assert (
+        diff(before, after).to_dict()
+        == diff(
+            snapshot(repo, first, parser=parser, cache=False),
+            snapshot(repo, "HEAD", parser=parser, cache=False),
+        ).to_dict()
+    )

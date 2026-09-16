@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ from archer.graph.diff import diff
 from archer.graph.model import Graph
 from archer.render import d2_source, render
 from archer.scan import scan
+from archer.scan.cache import cache_info, clear_cache
 
 
 def nonnegative(value):
@@ -46,6 +48,12 @@ def parser():
             "--source-root",
             action="append",
             help="Import root relative to repository; repeatable; auto-detects src",
+        )
+        cmd.add_argument("--parser", choices=("rust", "libcst"), help="Extraction backend (default: rust)")
+        cmd.add_argument("--no-cache", action="store_true", help="Disable extraction cache reads and writes")
+        cmd.add_argument("--cache-dir", type=Path, help="Override the user extraction cache directory")
+        cmd.add_argument(
+            "--cache-max-mb", type=nonnegative, help="Cache size limit in MiB (default: 512; 0 disables)"
         )
         cmd.add_argument("--exclude", action="append", help="Repository-relative glob; repeatable")
         cmd.add_argument(
@@ -121,6 +129,12 @@ def parser():
             cmd.add_argument("--fan-threshold", type=nonnegative, default=15)
             cmd.add_argument("--coupling-threshold", type=nonnegative, default=0)
             cmd.add_argument("--format", choices=["text", "json"], default="text")
+    cache = commands.add_parser("cache", help="Inspect or clear the extraction cache")
+    actions = cache.add_subparsers(dest="cache_action", required=True)
+    for action in ("info", "clear"):
+        cmd = actions.add_parser(action)
+        cmd.add_argument("--cache-dir", type=Path, help="Override the user extraction cache directory")
+        cmd.add_argument("--format", choices=("text", "json"), default="text")
     doctor = commands.add_parser("doctor")
     doctor.add_argument("--format", choices=["text", "json"], default="text")
     commands.add_parser("skill", help="Print the bundled Agent Skill")
@@ -145,7 +159,31 @@ def configuration(args):
         raise ValueError("source_roots must be a list of repository-relative paths")
     if not isinstance(excludes, list) or not all(isinstance(p, str) for p in excludes):
         raise ValueError("exclude must be a list of glob strings")
-    return {"source_roots": roots, "excludes": excludes}
+    backend = args.parser if args.parser is not None else config.get("parser", "rust")
+    if not isinstance(backend, str) or backend not in {"rust", "libcst"}:
+        raise ValueError("parser must be rust or libcst")
+    cache = config.get("cache", True)
+    cache_max_mb = args.cache_max_mb if args.cache_max_mb is not None else config.get("cache_max_mb", 512)
+    configured_dir = config.get("cache_dir")
+    if not isinstance(cache, bool):
+        raise ValueError("cache must be a boolean")  # noqa: TRY004 -- report invalid CLI configuration
+    if type(cache_max_mb) is not int or cache_max_mb < 0:
+        raise ValueError("cache_max_mb must be a nonnegative integer")
+    if configured_dir is not None and (not isinstance(configured_dir, str) or not configured_dir):
+        raise ValueError("cache_dir must be a nonempty path string")
+    directory = args.cache_dir
+    if directory is None and configured_dir is not None:
+        directory = Path(configured_dir).expanduser()
+        if not directory.is_absolute():
+            directory = root / directory
+    return {
+        "source_roots": roots,
+        "excludes": excludes,
+        "parser": backend,
+        "cache": cache and not args.no_cache,
+        "cache_dir": directory,
+        "cache_max_mb": cache_max_mb,
+    }
 
 
 def emit(text, output=None):
@@ -230,11 +268,28 @@ def doctor():
     return {
         "archer": __version__,
         "backends": backends,
-        "semantic_enrichment": "reserved for future providers; v1 uses Archer/LibCST resolution",
+        "semantic_enrichment": "reserved for future providers; v1 uses Archer static resolution",
     }
 
 
 def run(args):
+    if args.command == "cache":
+        try:
+            if args.cache_action == "clear":
+                clear_cache(args.cache_dir)
+            report = cache_info(args.cache_dir)
+        except (sqlite3.Error, OSError) as exc:
+            raise ValueError(f"Cache operation failed: {exc}") from exc
+        if args.format == "json":
+            emit(json.dumps(report, indent=2) + "\n")
+        else:
+            prefix = "Cleared cache" if args.cache_action == "clear" else "Cache"
+            emit(
+                f"{prefix}: {report['directory']}\n{report['entries']} entries; {report['bytes'] / 1024**2:.2f} MiB on disk\n"
+            )
+            if report.get("error"):
+                emit(f"Cache unavailable: {report['error']}\n")
+        return 2 if report.get("error") else 0
     if args.command == "doctor":
         report = doctor()
         emit(

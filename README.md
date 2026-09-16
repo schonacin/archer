@@ -29,7 +29,7 @@ uv tool install '.[all]'
 
 Append `@TAG_OR_COMMIT` to the Git URL to pin an installation. For example, a tagged release can use `git+https://github.com/schonacin/archer.git@v0.1`. Upgrade a uv installation by repeating the command with `--force`.
 
-The base package only needs LibCST and NetworkX. Extras are `render`, `semantic`, and `all`; the render extra is currently empty because D2 is an external executable. The semantic extra installs Pyright for future integration, but semantic enrichment is **not enabled in v1**. Install [D2](https://d2lang.com/tour/install/) separately for SVG, PNG, and PDF output; `--format d2` does not need it. Run `archer doctor` after installation to inspect available tools and layouts.
+The base package includes a Rust extension using pinned Ruff crates and depends on NetworkX. Source/Git installs require the pinned Rust 1.96.0 toolchain and a C compiler; install Rust with [rustup](https://rustup.rs/). Prebuilt wheels do not require Rust. Extras are `libcst`, `render`, `semantic`, and `all`; the render extra is currently empty because D2 is an external executable. The semantic extra installs Pyright for future integration, but semantic enrichment is **not enabled in v1**. Install [D2](https://d2lang.com/tour/install/) separately for SVG, PNG, and PDF output; `--format d2` does not need it. Run `archer doctor` after installation to inspect available tools and layouts.
 
 ```sh
 archer scan --root /path/to/repo
@@ -42,7 +42,7 @@ D2 installation and layouts: [official installation guide](https://d2lang.com/to
 
 ## Commands
 
-Archer has seven commands:
+Archer has eight commands:
 
 | Command | Purpose |
 |---|---|
@@ -51,6 +51,7 @@ Archer has seven commands:
 | `context` | Produce bounded Markdown architecture context for a human or coding agent. |
 | `diff [REV_A REV_B]` | Compare two Git snapshots as a semantic graph diff. |
 | `check` | Check cycles, fan-in/out, and increased coupling against an optional baseline. |
+| `cache info` / `cache clear` | Inspect or clear the shared extraction cache. |
 | `doctor` | Report Archer and external-tool availability. |
 | `skill` | Print the bundled Archer Agent Skill. |
 
@@ -64,6 +65,10 @@ These flags are available on `scan`, `render`, `context`, `diff`, and `check`, e
 |---|---|---|
 | `--root PATH` | `scan`, `render`, `context`, `diff`, `check` | Repository to inspect. Defaults to `ARCHER_ROOT`, then the current directory. |
 | `--source-root PATH` | `scan`, `render`, `context`, `diff`, `check` | Import root relative to the repository. Repeatable; otherwise Archer auto-detects `src`. |
+| `--parser rust` / `--parser libcst` | `scan`, `render`, `context`, `diff`, `check` | Extraction backend. Defaults to Rust; LibCST requires `archer[libcst]` (also included in `all`). |
+| `--no-cache` | `scan`, `render`, `context`, `diff`, `check` | Disable extraction cache reads and writes. |
+| `--cache-dir PATH` | `scan`, `render`, `context`, `diff`, `check` | Override the user cache directory. |
+| `--cache-max-mb N` | `scan`, `render`, `context`, `diff`, `check` | Cache database limit in MiB; default 512, zero disables caching. |
 | `--exclude GLOB` | `scan`, `render`, `context`, `diff`, `check` | Repository-relative source exclusion. Repeatable; quote shell globs. |
 | `-o PATH`, `--output PATH` | `scan`, `render`, `context`, `diff`, `check` | Explicit destination. `-` streams to stdout. Scan, render, context, and diff otherwise use descriptive files under `./archer/`; check defaults to stdout. |
 | `--graph FILE` | `scan`, `render`, `context`, `check` | Read an existing Archer JSON graph instead of scanning. Not available on `diff`. |
@@ -136,7 +141,7 @@ Checks on a current graph report cycles and high fan-in/out. Baseline checks add
 
 Exit status is `0` for success, `1` when `check` finds architecture findings, and `2` for an operational error or incomplete scan. An incomplete scan still emits its partial graph or output.
 
-Scanning isolates each file: failed extraction retains a module placeholder and a diagnostic, without partial declarations or relationships from that file. Syntax trees exceeding depth 100 or 1,000,000 nodes are skipped before LibCST metadata processing. Python recursion errors during parsing, metadata, or extraction are also reported. Alias and inherited-member resolution use iterative searches with a 10,000-step budget per reference; alias names are limited to 4,096 characters. Exhausted searches retain an unresolved reference and a resolution diagnostic. These conservative limits can mark unusually complex valid code incomplete. Diagnostics identify the file and processing stage; filesystem and Git snapshot scans use the same limits. The syntax-tree check runs after parsing and is not a process-level memory or timeout limit.
+Scanning isolates each file: failed extraction retains a module placeholder and a diagnostic, without partial declarations or relationships from that file. Rust uses an iterative AST walk with depth 512 and 1,000,000-node limits; pre-parse limits also bound source size, tokens, and nesting. LibCST retains its depth-100 and 1,000,000-node limits. Alias and inherited-member resolution use iterative searches with a 10,000-step budget per reference; alias names are limited to 4,096 characters. Exhausted searches retain an unresolved reference and a resolution diagnostic. Limits can mark unusually complex valid code incomplete. Diagnostics identify the file and stage; filesystem and Git snapshot scans use the same selected backend. See [parser architecture and compatibility](docs/PARSERS.md) for the contract, limits, and benchmarks.
 
 
 ## Output files
@@ -218,7 +223,7 @@ This includes the selected module and its immediate incoming and outgoing module
 
 ## Discovery and semantics
 
-Python 3.11+ is required. LibCST is the primary parser and lexical metadata engine. Sources auto-detect `src/`; otherwise the repository is the import root. Hidden directories, virtualenvs, build outputs, and symlinks are skipped. Normal scans include tests. Narrow scans with repeatable `--exclude 'tests/*'` and `--source-root src`. Module name collisions fail explicitly. Configuration can live in the scanned repository:
+Python 3.11+ is required. Rust extraction using Ruff is the default. Select the Python/LibCST implementation with `--parser libcst` or `parser = "libcst"` in `[tool.archer]`. An unavailable backend is an explicit error, with no automatic fallback. Sources auto-detect `src/`; otherwise the repository is the import root. Hidden directories, virtualenvs, build outputs, and symlinks are skipped. Normal scans include tests. Narrow scans with repeatable `--exclude 'tests/*'` and `--source-root src`. Module name collisions fail explicitly. Configuration can live in the scanned repository:
 
 ```toml
 [tool.archer]
@@ -243,6 +248,6 @@ docker compose run --rm archer scan --root /repo -o /output/graph.json
 ARCHER_REPO=/absolute/path/to/project docker compose run --rm archer render --root /repo -o /output/architecture.svg
 ```
 
-The image installs this package and all extras from `uv.lock` using `uv sync --locked --extra all` and a pinned, checksum-verified D2 release. The test target includes pytest and Ruff. Repository mounts are read-only; Compose sets `ARCHER_ROOT=/repo` and works from the writable `/output` mount. Default files therefore go to `artifacts/archer/` on the host; explicit `/output/FILE` paths go directly to `artifacts/`. For local development: `uv sync --extra all --extra test`, `uv run pytest`, `uv run ruff check src tests`.
+The image installs this package and all extras from `uv.lock` using `uv sync --locked --extra all` and a pinned, checksum-verified D2 release. The test target includes pytest and Ruff. Repository mounts are read-only; Compose sets `ARCHER_ROOT=/repo` and works from the writable `/output` mount. Default files therefore go to `artifacts/archer/` on the host; explicit `/output/FILE` paths go directly to `artifacts/`. For local development, install Rust with rustup (the repository pins its toolchain), then run `uv sync --extra all --extra test`, `uv run pytest`, `uv run ruff check src tests`.
 
 The [validation report](docs/VALIDATION.md) records automated coverage, packaging checks, Docker verification, and renderer validation.

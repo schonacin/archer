@@ -12,18 +12,22 @@ name = "archer"
 version = "0.1"
 source = { editable = "." }
 dependencies = [
-    { name = "libcst" },
     { name = "networkx" },
 ]
 
 [package.optional-dependencies]
 all = [
+    { name = "libcst" },
     { name = "pyright" },
+]
+libcst = [
+    { name = "libcst" },
 ]
 semantic = [
     { name = "pyright" },
 ]
 test = [
+    { name = "libcst" },
     { name = "pillow" },
     { name = "pytest" },
     { name = "resvg-py" },
@@ -32,8 +36,9 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "archer", extras = ["render", "semantic"], marker = "extra == 'all'" },
-    { name = "libcst", specifier = ">=1.5,<2" },
+    { name = "archer", extras = ["render", "semantic", "libcst"], marker = "extra == 'all'" },
+    { name = "libcst", marker = "extra == 'libcst'", specifier = ">=1.5,<2" },
+    { name = "libcst", marker = "extra == 'test'", specifier = ">=1.5,<2" },
     { name = "networkx", specifier = ">=3.4,<4" },
     { name = "pillow", marker = "extra == 'test'", specifier = ">=12,<13" },
     { name = "pyright", marker = "extra == 'semantic'", specifier = ">=1.1.400,<2" },
@@ -41,7 +46,7 @@ requires-dist = [
     { name = "resvg-py", marker = "extra == 'test'", specifier = ">=0.5,<1" },
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.11,<1" },
 ]
-provides-extras = ["render", "semantic", "all", "test"]
+provides-extras = ["libcst", "render", "semantic", "all", "test"]
 
 [[package]]
 name = "colorama"

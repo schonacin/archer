@@ -284,3 +284,19 @@ def test_deep_saved_graph_is_a_clean_error(tmp_path, capsys):
     graph.write_text("[" * 10000 + "0" + "]" * 10000)
     assert main(["scan", "--root", str(tmp_path), "--graph", str(graph)]) == 2
     assert "Graph JSON exceeds supported nesting depth" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("invalid", ['"invalid"', "[]", "true"])
+def test_parser_flag_overrides_configuration(tmp_path, capsys, invalid):
+    (tmp_path / "a.py").write_text("def f(): pass\nf()")
+    config = tmp_path / "pyproject.toml"
+    config.write_text(f"[tool.archer]\nparser={invalid}\n")
+    assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 2
+    assert "parser must be" in capsys.readouterr().err
+    for backend in ("rust", "libcst"):
+        assert main(["scan", "--root", str(tmp_path), "--parser", backend, "-o", "-"]) == 0
+        graph = json.loads(capsys.readouterr().out)
+        assert "a.f" in {n["id"] for n in graph["nodes"]}
+        config.write_text(f'[tool.archer]\nparser="{backend}"\n')
+        assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 0
+        assert json.loads(capsys.readouterr().out) == graph

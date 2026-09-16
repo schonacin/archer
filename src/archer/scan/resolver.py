@@ -91,7 +91,7 @@ class Resolver:
         if found:
             if len(candidates) > 1 or len(found) > 1 or any(n in self.rebindings for n in candidates):
                 return found, "ambiguous", "multiple lexical bindings or reassignment"
-            return found, "exact", "LibCST lexical binding and repository declaration"
+            return found, "exact", "lexical binding and repository declaration"
         # Receiver identity comes from lexical metadata, not the spelling 'self'.
         for candidate in ref["candidates"]:
             parts = candidate.split(".")

@@ -1,7 +1,19 @@
 import json
+from functools import partial
+
+import pytest
 
 from archer.graph.model import Graph
-from archer.scan import scan, scan_sources
+from archer.scan import scan as _scan
+from archer.scan import scan_sources as _scan_sources
+
+scan, scan_sources = _scan, _scan_sources
+
+
+@pytest.fixture(autouse=True, params=["rust", "libcst"])
+def backend(request, monkeypatch):
+    monkeypatch.setattr(__name__ + ".scan", partial(_scan, parser=request.param))
+    monkeypatch.setattr(__name__ + ".scan_sources", partial(_scan_sources, parser=request.param))
 
 
 def edges(graph, kind):
@@ -175,7 +187,7 @@ def test_deep_syntax_preserves_healthy_files():
 
 
 def test_late_extraction_failure_is_atomic(monkeypatch):
-    from archer.scan.parser import Extractor
+    from archer.scan.libcst_backend import Extractor
 
     original = Extractor.visit_FunctionDef
 
@@ -185,7 +197,7 @@ def test_late_extraction_failure_is_atomic(monkeypatch):
             raise RecursionError("injected late failure")
 
     monkeypatch.setattr(Extractor, "visit_FunctionDef", fail_after_declaration)
-    graph = scan_sources({"bad.py": "def partial(): pass", "ok.py": "def good(): pass"})
+    graph = scan_sources({"bad.py": "def partial(): pass", "ok.py": "def good(): pass"}, parser="libcst")
     assert "bad.partial" not in graph.nodes
     assert "ok.good" in graph.nodes
     assert not any(e.source == "bad" for e in graph.edges)
@@ -264,7 +276,7 @@ def test_resolution_budget_discards_partial_candidates(monkeypatch):
 
 
 def test_metadata_recursion_and_node_budget_are_reported(monkeypatch):
-    from archer.scan import parser
+    from archer.scan import libcst_backend as parser
 
     with monkeypatch.context() as patch:
 
@@ -272,11 +284,11 @@ def test_metadata_recursion_and_node_budget_are_reported(monkeypatch):
             raise RecursionError("injected metadata failure")
 
         patch.setattr(parser.MetadataWrapper, "resolve_many", fail_metadata)
-        graph = scan_sources({"a.py": "def f(): pass"})
+        graph = scan_sources({"a.py": "def f(): pass"}, parser="libcst")
         assert graph.metadata["diagnostics"][0]["stage"] == "metadata"
         assert set(graph.nodes) == {"a"}
     monkeypatch.setattr(parser, "MAX_CST_NODES", 30)
-    graph = scan_sources({"large.py": "x = 1\n" * 30, "ok.py": "pass"})
+    graph = scan_sources({"large.py": "x = 1\n" * 30, "ok.py": "pass"}, parser="libcst")
     assert [d["file"] for d in graph.metadata["diagnostics"]] == ["large.py"]
     assert graph.metadata["diagnostics"][0]["stage"] == "complexity"
 
