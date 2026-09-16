@@ -57,3 +57,15 @@ def test_revision_pair_and_ignored_files(repo):
     assert "ignored" not in snapshot(repo, "WORKTREE").nodes
     with pytest.raises(ValueError):
         snapshot(repo, "--invalid")
+
+
+def test_deep_file_diagnostics_across_snapshots(repo):
+    (repo / "bad.py").write_text("x = " + "+".join(["x"] * 600))
+    git(repo, "add", "bad.py")
+    git(repo, "commit", "-m", "deep expression")
+    for revision in ("HEAD", "INDEX", "WORKTREE"):
+        graph = snapshot(repo, revision)
+        assert "a.first" in graph.nodes
+        assert graph.metadata["diagnostics"][0]["file"] == "bad.py"
+        assert graph.metadata["diagnostics"][0]["stage"] == "complexity"
+        graph.validate()

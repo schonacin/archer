@@ -136,6 +136,9 @@ Checks on a current graph report cycles and high fan-in/out. Baseline checks add
 
 Exit status is `0` for success, `1` when `check` finds architecture findings, and `2` for an operational error or incomplete scan. An incomplete scan still emits its partial graph or output.
 
+Scanning isolates each file: failed extraction retains a module placeholder and a diagnostic, without partial declarations or relationships from that file. Syntax trees exceeding depth 100 or 1,000,000 nodes are skipped before LibCST metadata processing. Python recursion errors during parsing, metadata, or extraction are also reported. Alias and inherited-member resolution use iterative searches with a 10,000-step budget per reference; alias names are limited to 4,096 characters. Exhausted searches retain an unresolved reference and a resolution diagnostic. These conservative limits can mark unusually complex valid code incomplete. Diagnostics identify the file and processing stage; filesystem and Git snapshot scans use the same limits. The syntax-tree check runs after parsing and is not a process-level memory or timeout limit.
+
+
 ## Output files
 
 Artifact-producing commands write under `archer/` in the **current working directory**, even when `--root` points elsewhere. `-o PATH` overrides the destination; `-o -` streams text or rendered image bytes to stdout. Parent directories are created automatically. Check/doctor/skill diagnostics continue to use stdout by default. `ARCHER_ROOT` can set the default scan root; an explicit `--root` takes precedence.

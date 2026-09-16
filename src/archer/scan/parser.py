@@ -185,8 +185,46 @@ class Extractor(cst.CSTVisitor):
             self.assignment(target.target, types)
 
 
+MAX_CST_DEPTH = 100
+MAX_CST_NODES = 1_000_000
+
+
+class ExtractionLimitError(Exception):
+    def __init__(self, stage, message):
+        self.stage = stage
+        super().__init__(message)
+
+
+def check_tree(tree):
+    # Iterator frames bound memory by depth rather than tree width.
+    stack = [iter((tree,))]
+    count = 0
+    while stack:
+        node = next(stack[-1], None)
+        if node is None:
+            stack.pop()
+            continue
+        count += 1
+        if len(stack) > MAX_CST_DEPTH or count > MAX_CST_NODES:
+            raise ExtractionLimitError(
+                "complexity", f"Syntax tree exceeds depth {MAX_CST_DEPTH} or node budget {MAX_CST_NODES}"
+            )
+        stack.append(iter(node.children))
+
+
 def extract(graph, module, file, source):
-    wrapper = MetadataWrapper(cst.parse_module(source))
-    visitor = Extractor(graph, module, file, wrapper.module)
-    wrapper.visit(visitor)
-    return visitor
+    stage = "parse"
+    try:
+        tree = cst.parse_module(source)
+        stage = "complexity"
+        check_tree(tree)
+        # Fresh parser trees have unique nodes and need no defensive deep clone.
+        wrapper = MetadataWrapper(tree, unsafe_skip_copy=True)
+        stage = "metadata"
+        wrapper.resolve_many(Extractor.METADATA_DEPENDENCIES)
+        visitor = Extractor(graph, module, file, wrapper.module)
+        stage = "extraction"
+        wrapper.visit(visitor)
+        return visitor
+    except RecursionError as exc:
+        raise ExtractionLimitError(stage, f"Recursion limit exceeded during {stage}") from exc

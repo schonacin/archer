@@ -274,7 +274,10 @@ def run(args):
     elif args.graph:
         if mode:
             raise ValueError("--graph cannot be combined with Git snapshot options")
-        graph = Graph.from_dict(json.loads(args.graph.read_text()))
+        try:
+            graph = Graph.from_dict(json.loads(args.graph.read_text()))
+        except RecursionError as exc:
+            raise ValueError("Graph JSON exceeds supported nesting depth") from exc
     elif getattr(args, "changes", False) or getattr(args, "level", None) == "changes" or mode:
         before, after = pair(args.root, mode=mode, **kwargs)
         graph = diff(before, after)

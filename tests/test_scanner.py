@@ -162,3 +162,136 @@ def test_module_source_ranges_have_real_end_positions():
         ("", {"line": 1, "column": 0}),
     ]:
         assert scan_sources({"a.py": source}).nodes["a"].source_range["end"] == end
+
+
+def test_deep_syntax_preserves_healthy_files():
+    for expression in ["+".join(["x"] * 600), ".".join(["x"] * 600) + "()"]:
+        graph = scan_sources({"bad/__init__.py": "value = " + expression, "ok.py": "def good(): pass"})
+        assert graph.nodes["bad"].kind == "package"
+        assert "ok.good" in graph.nodes
+        assert graph.metadata["diagnostics"][0]["stage"] == "complexity"
+        assert not any(n.startswith("bad.") for n in graph.nodes)
+        graph.validate()
+
+
+def test_late_extraction_failure_is_atomic(monkeypatch):
+    from archer.scan.parser import Extractor
+
+    original = Extractor.visit_FunctionDef
+
+    def fail_after_declaration(self, node):
+        original(self, node)
+        if self.module == "bad":
+            raise RecursionError("injected late failure")
+
+    monkeypatch.setattr(Extractor, "visit_FunctionDef", fail_after_declaration)
+    graph = scan_sources({"bad.py": "def partial(): pass", "ok.py": "def good(): pass"})
+    assert "bad.partial" not in graph.nodes
+    assert "ok.good" in graph.nodes
+    assert not any(e.source == "bad" for e in graph.edges)
+    assert graph.metadata["diagnostics"][0]["stage"] == "extraction"
+    graph.validate()
+
+
+def test_long_reexports_and_inheritance():
+    sources = {f"m{i}.py": f"from m{i + 1} import f\n" for i in range(1200)}
+    sources["m1200.py"] = "def f(): pass"
+    sources["use.py"] = "from m0 import f\nf()"
+    sources["classes.py"] = (
+        "class C0:\n def run(self): pass\n"
+        + "".join(f"class C{i}(C{i - 1}): pass\n" for i in range(1, 1200))
+        + "class End(C1199):\n def work(self): self.run()\n"
+    )
+    graph = scan_sources(sources)
+    assert not graph.metadata["diagnostics"]
+    calls = edges(graph, "calls")
+    assert calls["use", "m1200.f"].resolution["status"] == "exact"
+    assert calls["classes.End.work", "classes.C0.run"].resolution["status"] == "strong"
+
+
+def test_expanding_alias_preserves_unresolved_reference():
+    graph = scan_sources({"a.py": "from a.x import x\nx()", "ok.py": "def f(): pass\nf()"})
+    calls = edges(graph, "calls")
+    failed = [e for e in calls.values() if e.source == "a"]
+    assert len(failed) == 1
+    assert failed[0].resolution["status"] == "unresolved"
+    assert graph.nodes[failed[0].target].kind == "unresolved"
+    assert calls["ok", "ok.f"].resolution["status"] == "exact"
+    assert all(d["file"] == "a.py" and d["stage"] == "resolution" for d in graph.metadata["diagnostics"])
+    assert graph.metadata["diagnostics"]
+    graph.validate()
+
+
+def test_resolution_cycles_and_diamonds():
+    graph = scan_sources(
+        {
+            "a.py": "from b import f\nf()",
+            "b.py": "from a import f",
+            "classes.py": (
+                "class Root:\n def run(self): pass\n"
+                "class Left(Root): pass\nclass Right(Root): pass\n"
+                "class Both(Left, Right):\n def work(self): self.run()\n"
+                "class A(B): pass\nclass B(A):\n def work(self): self.missing()\n"
+            ),
+        }
+    )
+    assert not graph.metadata["diagnostics"]
+    calls = edges(graph, "calls")
+    assert calls["classes.Both.work", "classes.Root.run"].resolution["status"] == "strong"
+    assert any(
+        e.source == "classes.B.work" and e.resolution["status"] == "unresolved" for e in calls.values()
+    )
+    graph.validate()
+
+
+def test_resolution_budget_discards_partial_candidates(monkeypatch):
+    from archer.scan import resolver
+
+    monkeypatch.setattr(resolver, "MAX_RESOLUTION_STEPS", 20)
+    sources = {f"m{i}.py": f"from m{i + 1} import f" for i in range(30)}
+    sources.update(
+        {
+            "m30.py": "def f(): pass",
+            "a.py": "def f(): pass",
+            "use.py": "if flag:\n from a import f\nelse:\n from m0 import f\nf()",
+        }
+    )
+    graph = scan_sources(sources)
+    call = next(e for e in graph.edges if e.source == "use" and e.kind == "calls")
+    assert call.resolution["status"] == "unresolved"
+    assert graph.nodes[call.target].kind == "unresolved"
+    assert graph.nodes[call.target].metadata["candidates"] == []
+
+
+def test_metadata_recursion_and_node_budget_are_reported(monkeypatch):
+    from archer.scan import parser
+
+    with monkeypatch.context() as patch:
+
+        def fail_metadata(*args):
+            raise RecursionError("injected metadata failure")
+
+        patch.setattr(parser.MetadataWrapper, "resolve_many", fail_metadata)
+        graph = scan_sources({"a.py": "def f(): pass"})
+        assert graph.metadata["diagnostics"][0]["stage"] == "metadata"
+        assert set(graph.nodes) == {"a"}
+    monkeypatch.setattr(parser, "MAX_CST_NODES", 30)
+    graph = scan_sources({"large.py": "x = 1\n" * 30, "ok.py": "pass"})
+    assert [d["file"] for d in graph.metadata["diagnostics"]] == ["large.py"]
+    assert graph.metadata["diagnostics"][0]["stage"] == "complexity"
+
+
+def test_inheritance_budget_preserves_reference(monkeypatch):
+    from archer.scan import resolver
+
+    monkeypatch.setattr(resolver, "MAX_RESOLUTION_STEPS", 20)
+    source = (
+        "class C0:\n def run(self): pass\n"
+        + "".join(f"class C{i}(C{i - 1}): pass\n" for i in range(1, 40))
+        + "class End(C39):\n def work(self): self.run()\n"
+    )
+    graph = scan_sources({"a.py": source})
+    call = next(e for e in graph.edges if e.kind == "calls")
+    assert call.resolution["status"] == "unresolved"
+    assert graph.nodes[call.target].kind == "unresolved"
+    assert graph.metadata["diagnostics"][0]["stage"] == "resolution"

@@ -14,7 +14,7 @@ def context(graph, max_chars=12000, level="modules"):
     ]
     diagnostics = graph.metadata.get("diagnostics", [])
     if diagnostics:
-        lines.append(f"INCOMPLETE SCAN: {len(diagnostics)} parse errors; inspect JSON diagnostics.")
+        lines.append(f"INCOMPLETE SCAN: {len(diagnostics)} diagnostics; inspect JSON diagnostics.")
     if graph.metadata.get("diff"):
         lines.append(f"Snapshots: {graph.metadata.get('before')} -> {graph.metadata.get('after')}")
     lines.extend(["", "## Hierarchy and source locations"])

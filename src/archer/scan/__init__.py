@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 import libcst as cst
 
 from archer.graph.model import Edge, Graph, Node, resolution
-from archer.scan.parser import extract, fingerprint
+from archer.scan.parser import ExtractionLimitError, extract, fingerprint
 from archer.scan.resolver import Resolver
 
 EXCLUDED = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "build", "dist", ".tox", ".archer"}
@@ -101,10 +101,15 @@ def scan_sources(sources, *, source_roots=None, excludes=(), snapshot=None):
                 },
                 {"fingerprint": digest},
             )
-            graph.nodes[module] = node
-            visitor = extract(graph, module, file, source)
+            staged = Graph(nodes={module: node})
+            visitor = extract(staged, module, file, source)
+            graph.nodes.update(staged.nodes)
+            graph.edges.extend(staged.edges)
+            visitor.graph = graph
             visitors.append(visitor)
         except (
+            ExtractionLimitError,
+            RecursionError,
             cst.ParserSyntaxError,
             tokenize.TokenError,
             IndentationError,
@@ -114,7 +119,7 @@ def scan_sources(sources, *, source_roots=None, excludes=(), snapshot=None):
             # Preserve the module and report an incomplete scan explicitly.
             graph.nodes[module] = Node(
                 module,
-                "module",
+                "package" if file.endswith("__init__.py") else "module",
                 module,
                 module,
                 file,
@@ -126,7 +131,14 @@ def scan_sources(sources, *, source_roots=None, excludes=(), snapshot=None):
                     ).hexdigest(),
                 },
             )
-            graph.metadata["diagnostics"].append({"file": file, "severity": "error", "message": str(exc)})
+            graph.metadata["diagnostics"].append(
+                {
+                    "file": file,
+                    "severity": "error",
+                    "stage": getattr(exc, "stage", "parse"),
+                    "message": str(exc),
+                }
+            )
         graph.metadata["modules"].append(module)
     # Namespace packages have no source file but remain part of the hierarchy.
     for module in list(graph.metadata["modules"]):

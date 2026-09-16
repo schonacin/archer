@@ -4,6 +4,13 @@ import hashlib
 
 from archer.graph.model import Edge, Node, resolution
 
+MAX_RESOLUTION_STEPS = 10_000
+MAX_ALIAS_LENGTH = 4096
+
+
+class ResolutionLimitError(Exception):
+    pass
+
 
 class Resolver:
     def __init__(self, graph, visitors):
@@ -23,38 +30,60 @@ class Resolver:
             self.rebindings.update(visitor.rebindings)
             self.pending.extend(visitor.pending)
         self.bases = {}
+        self.steps = 0
 
-    def aliases(self, name, seen=None):
-        seen = set() if seen is None else seen
-        if name in seen:
-            return {name}
-        seen.add(name)
-        parts = name.split(".")
-        for i in range(len(parts), 0, -1):
-            prefix = ".".join(parts[:i])
-            targets = self.exports.get(prefix, set()) - {prefix}
-            if targets:
-                return {
-                    value
-                    for target in targets
-                    for value in self.aliases(".".join([target] + parts[i:]), seen.copy())
-                }
-        return {name}
+    def consume_step(self):
+        self.steps += 1
+        if self.steps > MAX_RESOLUTION_STEPS:
+            raise ResolutionLimitError(f"Reference resolution exceeds {MAX_RESOLUTION_STEPS} steps")
+
+    def aliases(self, name):
+        result, active = set(), set()
+        stack = [(name, False)]
+        while stack:
+            name, leaving = stack.pop()
+            if leaving:
+                active.remove(name)
+                continue
+            self.consume_step()
+            if len(name) > MAX_ALIAS_LENGTH:
+                raise ResolutionLimitError(f"Alias expansion exceeds {MAX_ALIAS_LENGTH} characters")
+            if name in active:
+                result.add(name)
+                continue
+            active.add(name)
+            stack.append((name, True))
+            parts = name.split(".")
+            for i in range(len(parts), 0, -1):
+                self.consume_step()
+                prefix = ".".join(parts[:i])
+                targets = self.exports.get(prefix, set()) - {prefix}
+                if targets:
+                    for target in sorted(targets, reverse=True):
+                        stack.append((".".join([target] + parts[i:]), False))
+                    break
+            else:
+                result.add(name)
+        return result
 
     def candidates(self, names):
-        return sorted({target for name in names for target in self.aliases(name)})
+        return sorted({target for name in sorted(names) for target in self.aliases(name)})
 
-    def member(self, cls, suffix, seen=None):
-        seen = set() if seen is None else seen
-        if cls in seen:
-            return []
-        seen.add(cls)
-        direct = self.by_name.get(cls + "." + suffix, [])
-        if direct:
-            return direct
-        return sorted(
-            {target for base in self.bases.get(cls, []) for target in self.member(base, suffix, seen.copy())}
-        )
+    def member(self, cls, suffix):
+        result, seen = set(), set()
+        stack = [cls]
+        while stack:
+            cls = stack.pop()
+            self.consume_step()
+            if cls in seen:
+                continue
+            seen.add(cls)
+            direct = self.by_name.get(cls + "." + suffix, [])
+            if direct:
+                result.update(direct)
+            else:
+                stack.extend(self.bases.get(cls, []))
+        return sorted(result)
 
     def targets(self, ref):
         candidates = self.candidates(ref["candidates"])
@@ -99,9 +128,24 @@ class Resolver:
 
     def run(self):
         for ref in sorted(self.pending, key=lambda r: r["kind"] != "inherits"):
-            targets, status, evidence = self.targets(ref)
+            self.steps = 0
+            try:
+                targets, status, evidence = self.targets(ref)
+                candidates = self.candidates(ref["candidates"]) if not targets else []
+            except (ResolutionLimitError, RecursionError) as exc:
+                # Never turn partial search results into confident relationships.
+                targets, candidates, status = [], [], "unresolved"
+                evidence = str(exc) or "Recursion limit exceeded during resolution"
+                self.graph.metadata["diagnostics"].append(
+                    {
+                        "file": self.graph.nodes[ref["source"]].file,
+                        "severity": "error",
+                        "stage": "resolution",
+                        "range": ref["range"],
+                        "message": evidence,
+                    }
+                )
             if not targets:
-                candidates = self.candidates(ref["candidates"])
                 text = ref["text"]
                 external = bool(candidates) and all(
                     not any(n == m or n.startswith(m + ".") for m in self.graph.metadata["modules"])
