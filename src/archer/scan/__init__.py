@@ -7,6 +7,8 @@ import os
 import tokenize
 from pathlib import Path, PurePosixPath
 
+from pathspec import GitIgnoreSpec
+
 from archer.graph.model import Edge, Graph, Node, resolution
 from archer.scan.cache import FactsCache, backend_identity, cache_key
 from archer.scan.parser import ExtractionLimitError, fingerprint, get_parser
@@ -15,17 +17,24 @@ from archer.scan.resolver import Resolver
 EXCLUDED = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "build", "dist", ".tox", ".archer"}
 
 
-def included(path, excludes=()):
+def ignore_spec(root):
+    path = Path(root) / ".archerignore"
+    return GitIgnoreSpec.from_lines(path.read_text(encoding="utf-8").splitlines() if path.is_file() else [])
+
+
+def included(path, excludes=(), ignore=None):
     parts = PurePosixPath(path).parts
     return (
         path.endswith(".py")
         and not any(p in EXCLUDED or p.startswith(".") for p in parts)
         and not any(fnmatch.fnmatch(path, pattern) for pattern in excludes)
+        and not (ignore and ignore.match_file(path))
     )
 
 
 def read_sources(root, excludes=()):
     root = Path(root).resolve()
+    ignore = ignore_spec(root)
     result = {}
     for directory, dirs, files in os.walk(root, followlinks=False):
         dirs[:] = sorted(
@@ -36,7 +45,7 @@ def read_sources(root, excludes=()):
         for name in sorted(files):
             path = Path(directory) / name
             rel = path.relative_to(root).as_posix()
-            if included(rel, excludes) and not path.is_symlink():
+            if included(rel, excludes, ignore) and not path.is_symlink():
                 result[rel] = path.read_bytes()
     return result
 

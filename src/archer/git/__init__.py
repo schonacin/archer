@@ -3,7 +3,7 @@
 import subprocess
 from pathlib import Path
 
-from archer.scan import included, scan_sources
+from archer.scan import ignore_spec, included, scan_sources
 
 
 def git(root, *args):
@@ -20,13 +20,14 @@ def repository(root):
 def snapshot(root, revision, **kwargs):
     root = repository(root)
     sources = {}
+    ignore = ignore_spec(root)
     excludes = kwargs.get("excludes", ())
     if revision == "WORKTREE":
         paths = git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split(b"\0")
         for raw in sorted(set(paths)):
             path = raw.decode(errors="surrogateescape")
             p = root / path
-            if included(path, excludes) and p.is_file() and not p.is_symlink():
+            if included(path, excludes, ignore) and p.is_file() and not p.is_symlink():
                 sources[path] = p.read_bytes()
         metadata = {"kind": "WORKTREE"}
     else:
@@ -50,7 +51,7 @@ def snapshot(root, revision, **kwargs):
             path = raw.decode(errors="surrogateescape")
             if revision == "INDEX" and fields[2] != b"0":
                 raise ValueError("Index contains unresolved merge conflicts")
-            if included(path, excludes) and fields[0] in {b"100644", b"100755"}:
+            if included(path, excludes, ignore) and fields[0] in {b"100644", b"100755"}:
                 blobs.append((path, fields[1] if revision == "INDEX" else fields[2]))
         if blobs:
             result = subprocess.run(

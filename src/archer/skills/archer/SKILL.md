@@ -58,8 +58,8 @@ Render a graph using the shared flags, `--graph`, Git modes, and:
 - `--exclude-arrows MODULE`: hide incoming and outgoing arrows for a module subtree; repeatable.
 - `--exclude-arrows-to MODULE`: hide arrows entering a module subtree; repeatable.
 - `--exclude-arrows-from MODULE`: hide arrows leaving a module subtree; repeatable.
-- `--color-arrows`: use the source subsystem color; Git diffs retain change colors.
-- `--svg-optimization raw|medium|fast`: SVG processing; default `medium`. Raw preserves D2 bytes, medium uses clips and bounded masks, and fast uses approximate maskless clipped paths where supported.
+- `--color-arrows true|false`: use the source subsystem color (default true); Git diffs retain change colors.
+- `--svg-optimization raw|medium|fast`: SVG processing; default `fast`. Raw preserves D2 bytes, medium uses clips and bounded masks, and fast uses approximate maskless clipped paths where supported.
 - `--no-optimize-svg`: alias for raw, mutually exclusive with `--svg-optimization`.
 - `--format d2|svg|png|pdf`: output format; default `svg`.
 - `--layout auto|tala|elk|dagre`: D2 layout; default `auto`.
@@ -93,3 +93,5 @@ Use `archer check --worktree` after edits when architecture validation is reques
 ## Output and interpretation
 
 Artifact commands write below `./archer/` in the current working directory unless `-o` is supplied. `ARCHER_ROOT` changes the default scan root, not the output directory. Incomplete scans still emit partial output and exit `2`.
+
+Optional `archer.yaml` in the selected repository supplies shared and per-command flag defaults; explicit CLI flags override them. Use long flag names without `--`, booleans for switches, and lists for repeatable flags. Optional `.archerignore` supplies Git-style source exclusion patterns for scans and all Git snapshots.
