@@ -31,6 +31,22 @@ Append `@TAG_OR_COMMIT` to the Git URL to pin an installation. For example, a ta
 
 The base package includes a Rust extension using pinned Ruff crates and depends on NetworkX. Source/Git installs require the pinned Rust 1.96.0 toolchain and a C compiler; install Rust with [rustup](https://rustup.rs/). Prebuilt wheels do not require Rust. Extras are `libcst`, `render`, `semantic`, and `all`; the render extra is currently empty because D2 is an external executable. The semantic extra installs Pyright for future integration, but semantic enrichment is **not enabled in v1**. Install [D2](https://d2lang.com/tour/install/) separately for SVG, PNG, and PDF output; `--format d2` does not need it. Run `archer doctor` after installation to inspect available tools and layouts.
 
+The `Build wheels` GitHub Actions workflow builds Linux x86_64/ARM64 (glibc 2.28+), macOS Intel/Apple Silicon, and Windows x86_64 wheels. It runs on pull requests, pushes to `main`, `v*` tags, and manual dispatch. Each wheel is tested on standard CPython 3.11 and 3.14 with Rust hidden from `PATH`. Download the corresponding `wheels-PLATFORM` artifact from the workflow run, unzip it, and install its `.whl` file with `python -m pip install /path/to/archer-....whl`.
+
+On a version-tag push, all tests must pass before the workflow attaches the wheels to a GitHub release and publishes a wheel listing through GitHub Pages. The tag must match `[project].version` exactly, prefixed by `v` (currently `v0.1`). Re-running a tag workflow updates that release's wheel assets. The listing retains links to wheels from all published releases, so older pinned requirements continue to work. Nothing is published to PyPI.
+
+Before the first release, set the repository's **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. If the `github-pages` environment restricts deployment refs, allow the `v*` tags. The workflow uses the built-in `GITHUB_TOKEN`; no additional token is needed. Public release assets are required for unauthenticated Docker installs. The Pages deployment replaces the repository's Pages site with the wheel index.
+
+After a successful release and Pages deployment, a Docker project's `requirements.txt` can contain:
+
+```text
+--find-links https://schonacin.github.io/archer/wheels/
+--only-binary=archer
+archer==0.1
+```
+
+Use the actual Pages URL reported by the deployment if the repository owner, name, or domain differs. Docker's normal `python -m pip install -r requirements.txt` selects the compatible release wheel without Rust. This covers AMD64 and ARM64 Debian-based Python images (Python 3.11+); Alpine requires musllinux wheels, which this workflow does not build. For optional Python dependencies, use `archer[all]==0.1` instead. D2 remains a separate installation for image/PDF rendering.
+
 ```sh
 archer scan --root /path/to/repo
 archer render --root /path/to/repo
