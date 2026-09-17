@@ -55,7 +55,7 @@ def test_command_entrypoint_and_skill():
         text=True,
     )
     assert result.returncode == 0
-    assert json.loads(result.stdout)["archer"] == "0.1"
+    assert json.loads(result.stdout)["archer"] == "0.1.1"
     result = subprocess.run(
         [sys.executable, "-m", "archer", "skill"], check=False, capture_output=True, text=True
     )

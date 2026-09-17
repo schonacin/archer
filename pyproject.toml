@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "archer"
-version = "0.1"
+version = "0.1.1"
 description = "Static Python architecture graphs, diagrams, context, and Git comparisons"
 readme = "README.md"
 requires-python = ">=3.11"
