@@ -91,6 +91,48 @@ These flags are available on `scan`, `render`, `context`, `diff`, and `check`, e
 
 `--source-root` and `--exclude` affect scanning. Repository defaults may also be stored as `source_roots` and `exclude` under `[tool.archer]` in `pyproject.toml`; explicit CLI values replace the corresponding configured list.
 
+An optional `archer.yaml` supplies defaults for every command flag. Use long flag names without `--` (underscores are also accepted), YAML booleans for switches, and lists for repeatable flags. Top-level flags apply to commands that support them; command sections override those shared defaults:
+
+```yaml
+source-root: [src]
+exclude: [scripts/*]
+parser: rust
+no-cache: false
+render:
+  level: modules
+  format: svg
+  svg-optimization: fast
+  color-arrows: true
+  exclude-arrows-to: [acme.models]
+context:
+  max-chars: 16000
+check:
+  fan-threshold: 20
+cache:
+  format: json
+  info:
+    cache-dir: .cache/archer
+doctor:
+  format: json
+```
+
+Archer looks for `archer.yaml` in `--root`, otherwise `ARCHER_ROOT`, otherwise the current directory. It works normally when the file is absent or empty. A configured `root` is resolved relative to that YAML file; it does not trigger another config lookup. Other configured file paths are also relative to the YAML file, while explicit CLI paths remain relative to the working directory. `output: "-"` selects stdout.
+
+Precedence is explicit CLI flags, command YAML defaults, shared YAML defaults, then existing `[tool.archer]` scan settings and built-in defaults. Explicit repeatable flags replace configured lists. Snapshot switches such as `staged: true` and `worktree: true` are mutually exclusive; an explicit CLI snapshot flag overrides configured snapshot switches. Help/version actions and positional revision arguments remain CLI-only.
+
+An optional `.archerignore` in the repository root excludes Python source files using Git-style patterns, including comments, directory patterns, `**`, and `!` negation:
+
+```gitignore
+# Skip generated code and test fixtures
+generated/
+tests/fixtures/**
+*_generated.py
+!handwritten_generated.py
+```
+
+Ignore rules supplement `exclude` and `--exclude`; negation cannot restore files excluded by those options or Archer's built-in exclusions. The current repository's `.archerignore` applies consistently to filesystem scans and both sides of Git comparisons, including commits and the index. Neither configuration file needs to be committed.
+
+
 ### Git snapshot flags
 
 `render`, `context`, `diff`, and `check` accept one of these mutually exclusive modes:
@@ -121,8 +163,8 @@ Without a mode, `diff` and `--changes` use `HEAD` → working tree. Worktree sna
 | `--exclude-arrows MODULE` | Hide arrows both to and from the module and its descendants. Repeatable. |
 | `--exclude-arrows-to MODULE` | Hide arrows entering the module and its descendants. Repeatable. |
 | `--exclude-arrows-from MODULE` | Hide arrows leaving the module and its descendants. Repeatable. |
-| `--color-arrows` | Color arrows by their source subsystem. Git-change diagrams retain change colors. |
-| `--svg-optimization raw\|medium\|fast` | SVG post-processing level; default `medium`. |
+| `--color-arrows true\|false` | Color arrows by their source subsystem (default `true`; a bare flag also enables it). Git-change diagrams retain change colors. |
+| `--svg-optimization raw\|medium\|fast` | SVG post-processing level; default `fast`. |
 | `--no-optimize-svg` | Alias for `--svg-optimization raw`; mutually exclusive with that flag. |
 | `--format d2\|svg\|png\|pdf` | Output format; default `svg`. |
 | `--layout auto\|tala\|elk\|dagre` | D2 layout engine; default `auto`. |
@@ -189,8 +231,8 @@ Choose `--svg-optimization raw|medium|fast` at any diagram level:
 | Mode | Processing | Default filename suffix |
 | --- | --- | --- |
 | `raw` | Original D2 bytes, no post-processing | `-raw.svg` |
-| `medium` (default) | Vector clips for opaque cutouts, tightly bounded masks for fading | `.svg` |
-| `fast` | Replace supported masks with vector clips and faded copies of connector geometry | `-fast.svg` |
+| `medium` | Vector clips for opaque cutouts, tightly bounded masks for fading | `-medium.svg` |
+| `fast` (default) | Replace supported masks with vector clips and faded copies of connector geometry | `.svg` |
 
 Fast mode preserves embedded fonts, connector geometry, dash phase, colors, and draw order. It approximates compositing at antialiased clip boundaries; use medium when fidelity matters most. Unsupported SVG constructs retain their masks. Fast removes the expensive mask operations for supported D2 diagrams, but actual viewer speed should be compared on your device.
 
@@ -202,7 +244,7 @@ archer render --level modules --svg-optimization fast
 
 `--no-optimize-svg` remains an alias for `--svg-optimization raw`. PNG/PDF and D2-source output are unchanged. SVG engines can differ slightly in clip-versus-mask antialiasing, especially when a large diagram is reduced to a tiny overview; no geometry or text precision is reduced. Viewer-specific pan/zoom gains depend on the SVG engine.
 
-Opt into source-colored arrows with `--color-arrows`. They use the source subsystem's border color and produce `-colored-arrows` filenames. The flag is ignored for Git diffs, which preserve their existing change colors.
+Arrows use the source subsystem's border color by default. Disable this with `--color-arrows false` (producing `-plain-arrows` filenames), or enable it explicitly with `--color-arrows true`. The option is ignored for Git diffs, which preserve their change colors.
 
 Suppress visually noisy dependencies without removing their nodes:
 

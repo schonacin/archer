@@ -192,12 +192,12 @@ def test_arrow_coloring_is_optional_and_diff_ignores_it():
     from archer.render import subsystem_styles
 
     graph = scan_sources({"pkg/a.py": "import pkg.b", "pkg/b.py": ""})
-    plain, colored = d2_source(graph), d2_source(graph, color_arrows=True)
+    plain, colored = d2_source(graph, color_arrows=False), d2_source(graph)
     assert plain != colored
     arrow = next(line for line in colored.splitlines() if " -> " in line)
     assert f'style.stroke: "{subsystem_styles(graph)["pkg.a"][2]}"' in colored.split(arrow)[1]
     delta = diff(scan_sources({}), graph)
-    assert d2_source(delta) == d2_source(delta, color_arrows=True)
+    assert d2_source(delta) == d2_source(delta, color_arrows=False)
 
 
 def test_arrow_exclusions_support_to_from_both_and_module_subtrees():
@@ -247,7 +247,7 @@ def test_svg_postprocessing_and_raw_opt_out(tmp_path):
     assert b"archer-svg-" not in raw.read_bytes()
     assert any(e.get("mask") for e in ET.parse(raw).iter())
     assert main(["render", "--layout", "elk", "--svg-optimization", "fast"]) == 0
-    fast = tmp_path / "archer/architecture-modules-fast.svg"
+    fast = optimized
     assert not any(e.get("mask") for e in ET.parse(fast).iter())
     assert main(["render", "--layout", "elk", "--svg-optimization", "raw"]) == 0
     assert b"archer-svg-" not in raw.read_bytes()

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from archer import __version__
 from archer.checks import check
+from archer.config import boolean, parse_args
 from archer.context import context
 from archer.git import pair, snapshot
 from archer.graph.algorithms import LEVELS, changes, neighborhood
@@ -98,15 +99,19 @@ def parser():
             )
             cmd.add_argument(
                 "--color-arrows",
-                action="store_true",
-                help="Color arrows by source subsystem; ignored for Git diffs",
+                type=boolean,
+                nargs="?",
+                const=True,
+                default=True,
+                metavar="{true,false}",
+                help="Color arrows by source subsystem (default: true); ignored for Git diffs",
             )
             svg = cmd.add_mutually_exclusive_group()
             svg.add_argument(
                 "--svg-optimization",
                 choices=["raw", "medium", "fast"],
-                default="medium",
-                help="SVG post-processing: raw, medium (default), or approximate maskless fast",
+                default="fast",
+                help="SVG post-processing: raw, medium, or approximate maskless fast (default)",
             )
             svg.add_argument(
                 "--no-optimize-svg",
@@ -239,9 +244,9 @@ def default_output(args, graph):
                 parts.extend(["without-arrows" + direction, module])
         if args.external and args.level not in {"full", "changes"}:
             parts.append("external")
-        if args.color_arrows and not is_diff:
-            parts.append("colored-arrows")
-        if args.svg_optimization != "medium" and args.format == "svg":
+        if not args.color_arrows and not is_diff:
+            parts.append("plain-arrows")
+        if args.svg_optimization != "fast" and args.format == "svg":
             parts.append(args.svg_optimization)
     return Path("archer") / ("-".join(filename_part(p) for p in parts) + "." + extension)
 
@@ -431,7 +436,7 @@ def run(args):
 
 def main(argv=None):
     try:
-        return run(parser().parse_args(argv))
+        return run(parse_args(parser(), sys.argv[1:] if argv is None else argv))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"archer: {exc}", file=sys.stderr)
         return 2

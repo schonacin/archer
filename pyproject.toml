@@ -8,7 +8,11 @@ version = "0.1.1"
 description = "Static Python architecture graphs, diagrams, context, and Git comparisons"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["networkx>=3.4,<4"]
+dependencies = [
+    "networkx>=3.4,<4",
+    "pathspec>=0.12,<1",
+    "pyyaml>=6,<7",
+]
 
 [project.optional-dependencies]
 libcst = ["libcst>=1.5,<2"]

@@ -131,3 +131,10 @@ def test_cache_reuses_callers_but_resolves_each_snapshot(repo, tmp_path_factory,
             snapshot(repo, "HEAD", parser=parser, cache=False),
         ).to_dict()
     )
+
+
+@pytest.mark.parametrize("revision", ["HEAD", "INDEX", "WORKTREE"])
+def test_archerignore_applies_to_all_snapshots(repo, revision):
+    (repo / ".archerignore").write_text("*.py\n!a.py\n")
+    assert snapshot(repo, revision).metadata["modules"] == ["a"]
+    assert snapshot(repo, revision, excludes=["a.py"]).metadata["modules"] == []
