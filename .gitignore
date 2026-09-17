@@ -8,3 +8,7 @@ artifacts/
 .DS_Store
 
 /archer/
+
+/native/target/
+*.so
+*.pyd

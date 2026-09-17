@@ -1,4 +1,6 @@
-FROM python:3.12-bookworm AS base
+FROM rust:1.96.0-bookworm AS rust-toolchain
+
+FROM python:3.12-bookworm AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 ARG TARGETARCH
 ARG D2_VERSION=0.9.0
@@ -13,18 +15,28 @@ RUN case "${TARGETARCH}" in \
     && cp "/tmp/d2-v${D2_VERSION}/bin/d2" /usr/local/bin/d2 \
     && rm -rf /tmp/d2*
 ENV UV_NO_CACHE=1 UV_LINK_MODE=copy
+FROM runtime AS build
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:$PATH"
 WORKDIR /app
-COPY pyproject.toml README.md uv.lock ./
+COPY pyproject.toml README.md uv.lock rust-toolchain.toml ./
+COPY native ./native
 COPY src ./src
-RUN uv sync --locked --extra all --no-dev
+RUN uv sync --locked --extra all --no-dev --no-editable
+
+FROM runtime AS base
+COPY --from=build /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 WORKDIR /repo
 ENTRYPOINT ["archer"]
 CMD ["--help"]
 
-FROM base AS test
-WORKDIR /app
-RUN uv sync --locked --extra all --extra test --no-dev
+FROM build AS test
+RUN uv sync --locked --extra all --extra test --no-dev --no-editable
 COPY tests ./tests
-ENTRYPOINT ["pytest"]
+COPY scripts ./scripts
+COPY docs ./docs
+ENTRYPOINT ["uv", "run", "--no-sync", "pytest"]
 CMD ["-q", "-p", "no:cacheprovider"]

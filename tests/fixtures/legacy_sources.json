@@ -1,0 +1,5 @@
+{
+  "src/pkg/__init__.py": "from .base import Base\n",
+  "src/pkg/base.py": "class Base:\n def run(self): pass\n",
+  "src/pkg/use.py": "from pkg import Base as B\nclass Child(B):\n def work(self):\n  self.run()\n  missing()\ndef outer():\n def inner(): pass\n inner()\n"
+}

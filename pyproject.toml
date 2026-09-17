@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [project]
 name = "archer"
@@ -8,13 +8,14 @@ version = "0.1"
 description = "Static Python architecture graphs, diagrams, context, and Git comparisons"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["libcst>=1.5,<2", "networkx>=3.4,<4"]
+dependencies = ["networkx>=3.4,<4"]
 
 [project.optional-dependencies]
+libcst = ["libcst>=1.5,<2"]
 render = []
 semantic = ["pyright>=1.1.400,<2"]
-all = ["archer[render,semantic]"]
-test = ["pytest>=8,<10", "ruff>=0.11,<1", "resvg-py>=0.5,<1", "pillow>=12,<13"]
+all = ["archer[render,semantic,libcst]"]
+test = ["libcst>=1.5,<2","pytest>=8,<10", "ruff>=0.11,<1", "resvg-py>=0.5,<1", "pillow>=12,<13"]
 
 [project.scripts]
 archer = "archer.cli:main"
@@ -24,3 +25,12 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 110
+
+[tool.maturin]
+manifest-path = "native/Cargo.toml"
+python-source = "src"
+module-name = "archer._native"
+include = ["src/archer/skills/**/*", "rust-toolchain.toml"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "rust-toolchain.toml" }, { file = "native/Cargo.toml" }, { file = "native/Cargo.lock" }, { file = "native/src/**/*.rs" }]

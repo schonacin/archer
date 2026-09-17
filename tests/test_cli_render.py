@@ -266,3 +266,37 @@ def test_environment_root_keeps_outputs_in_working_directory(tmp_path, monkeypat
     (override / "explicit.py").write_text("x=1")
     assert main(["scan", "--root", str(override)]) == 0
     assert json.loads(output.read_text())["nodes"][0]["id"] == "explicit"
+
+
+def test_deep_file_reports_incomplete_scan(tmp_path, capsys):
+    (tmp_path / "bad.py").write_text("x = " + "+".join(["x"] * 600))
+    (tmp_path / "ok.py").write_text("def good(): pass")
+    assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 2
+    result = capsys.readouterr()
+    graph = json.loads(result.out)
+    assert "ok.good" in {n["id"] for n in graph["nodes"]}
+    assert graph["metadata"]["diagnostics"][0]["stage"] == "complexity"
+    assert "Incomplete scan" in result.err
+
+
+def test_deep_saved_graph_is_a_clean_error(tmp_path, capsys):
+    graph = tmp_path / "deep.json"
+    graph.write_text("[" * 10000 + "0" + "]" * 10000)
+    assert main(["scan", "--root", str(tmp_path), "--graph", str(graph)]) == 2
+    assert "Graph JSON exceeds supported nesting depth" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("invalid", ['"invalid"', "[]", "true"])
+def test_parser_flag_overrides_configuration(tmp_path, capsys, invalid):
+    (tmp_path / "a.py").write_text("def f(): pass\nf()")
+    config = tmp_path / "pyproject.toml"
+    config.write_text(f"[tool.archer]\nparser={invalid}\n")
+    assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 2
+    assert "parser must be" in capsys.readouterr().err
+    for backend in ("rust", "libcst"):
+        assert main(["scan", "--root", str(tmp_path), "--parser", backend, "-o", "-"]) == 0
+        graph = json.loads(capsys.readouterr().out)
+        assert "a.f" in {n["id"] for n in graph["nodes"]}
+        config.write_text(f'[tool.archer]\nparser="{backend}"\n')
+        assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 0
+        assert json.loads(capsys.readouterr().out) == graph

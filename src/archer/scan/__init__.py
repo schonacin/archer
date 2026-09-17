@@ -7,10 +7,9 @@ import os
 import tokenize
 from pathlib import Path, PurePosixPath
 
-import libcst as cst
-
 from archer.graph.model import Edge, Graph, Node, resolution
-from archer.scan.parser import extract, fingerprint
+from archer.scan.cache import FactsCache, backend_identity, cache_key
+from archer.scan.parser import ExtractionLimitError, fingerprint, get_parser
 from archer.scan.resolver import Resolver
 
 EXCLUDED = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "build", "dist", ".tox", ".archer"}
@@ -56,7 +55,22 @@ def module_name(path, roots):
     return ".".join(parts) or "__root__"
 
 
-def scan_sources(sources, *, source_roots=None, excludes=(), snapshot=None):
+def scan_sources(
+    sources,
+    *,
+    source_roots=None,
+    excludes=(),
+    snapshot=None,
+    parser="rust",
+    cache=True,
+    cache_dir=None,
+    cache_max_mb=512,
+):
+    if not isinstance(cache, bool):
+        raise TypeError("cache must be a boolean")
+    if type(cache_max_mb) is not int or cache_max_mb < 0:
+        raise ValueError("cache_max_mb must be a nonnegative integer")
+    extract = get_parser(parser)
     sources = {p: s for p, s in sources.items() if included(p, excludes)}
     roots = (
         source_roots
@@ -72,62 +86,91 @@ def scan_sources(sources, *, source_roots=None, excludes=(), snapshot=None):
         }
     )
     visitors = []
-    for file, raw in sorted(sources.items()):
-        module = module_name(file, roots)
-        if module in graph.nodes:
-            raise ValueError(
-                f"Module collision for {module}: {graph.nodes[module].file} and {file}; configure --source-root"
-            )
+    fact_cache = None
+    identity = None
+    if cache and cache_max_mb:
         try:
-            if isinstance(raw, bytes):
-                encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
-                source = raw.decode(encoding)
-            else:
-                source = raw
-            digest = fingerprint(source)
-            lines = source.splitlines()
-            trailing_newline = source.endswith(("\n", "\r"))
-            end_line = max(1, len(lines) + int(trailing_newline))
-            end_column = 0 if trailing_newline or not lines else len(lines[-1])
-            node = Node(
-                module,
-                "package" if file.endswith("__init__.py") else "module",
-                module,
-                module,
-                file,
-                {
-                    "start": {"line": 1, "column": 0},
-                    "end": {"line": end_line, "column": end_column},
-                },
-                {"fingerprint": digest},
-            )
-            graph.nodes[module] = node
-            visitor = extract(graph, module, file, source)
-            visitors.append(visitor)
-        except (
-            cst.ParserSyntaxError,
-            tokenize.TokenError,
-            IndentationError,
-            SyntaxError,
-            UnicodeError,
-        ) as exc:
-            # Preserve the module and report an incomplete scan explicitly.
-            graph.nodes[module] = Node(
-                module,
-                "module",
-                module,
-                module,
-                file,
-                None,
-                {
-                    "parse_error": str(exc),
-                    "fingerprint": hashlib.sha256(
-                        raw if isinstance(raw, bytes) else raw.encode()
-                    ).hexdigest(),
-                },
-            )
-            graph.metadata["diagnostics"].append({"file": file, "severity": "error", "message": str(exc)})
-        graph.metadata["modules"].append(module)
+            identity = backend_identity(parser)
+            fact_cache = FactsCache(cache_dir, cache_max_mb * 1024 * 1024)
+        except (OSError, ImportError):
+            pass
+    try:
+        for file, raw in sorted(sources.items()):
+            module = module_name(file, roots)
+            if module in graph.nodes:
+                raise ValueError(
+                    f"Module collision for {module}: {graph.nodes[module].file} and {file}; configure --source-root"
+                )
+            try:
+                if isinstance(raw, bytes):
+                    encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
+                    source = raw.decode(encoding)
+                else:
+                    source = raw
+                key = cache_key(raw, module, file, identity) if fact_cache is not None else None
+                cached = fact_cache.get(key, module, file) if fact_cache is not None else None
+                if cached is None:
+                    facts = extract(source, module, file)
+                    digest = fingerprint(source)
+                    if fact_cache is not None:
+                        fact_cache.put(key, facts, digest)
+                else:
+                    facts, digest = cached
+                lines = source.splitlines()
+                trailing_newline = source.endswith(("\n", "\r"))
+                end_line = max(1, len(lines) + int(trailing_newline))
+                end_column = 0 if trailing_newline or not lines else len(lines[-1])
+                node = Node(
+                    module,
+                    "package" if file.endswith("__init__.py") else "module",
+                    module,
+                    module,
+                    file,
+                    {
+                        "start": {"line": 1, "column": 0},
+                        "end": {"line": end_line, "column": end_column},
+                    },
+                    {"fingerprint": digest},
+                )
+                graph.nodes[module] = node
+                graph.nodes.update(facts.nodes)
+                graph.edges.extend(facts.edges)
+                visitors.append(facts)
+            except (
+                ExtractionLimitError,
+                RecursionError,
+                tokenize.TokenError,
+                IndentationError,
+                SyntaxError,
+                UnicodeError,
+            ) as exc:
+                # Preserve the module and report an incomplete scan explicitly.
+                graph.nodes[module] = Node(
+                    module,
+                    "package" if file.endswith("__init__.py") else "module",
+                    module,
+                    module,
+                    file,
+                    None,
+                    {
+                        "parse_error": str(exc),
+                        "fingerprint": hashlib.sha256(
+                            raw if isinstance(raw, bytes) else raw.encode()
+                        ).hexdigest(),
+                    },
+                )
+                graph.metadata["diagnostics"].append(
+                    {
+                        "file": file,
+                        "severity": "error",
+                        "stage": getattr(exc, "stage", "parse"),
+                        "message": str(exc),
+                    }
+                )
+            graph.metadata["modules"].append(module)
+    finally:
+        if fact_cache is not None:
+            fact_cache.close()
     # Namespace packages have no source file but remain part of the hierarchy.
     for module in list(graph.metadata["modules"]):
         parts = module.split(".")

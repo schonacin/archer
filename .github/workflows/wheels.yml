@@ -1,0 +1,178 @@
+name: Build wheels
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            container: quay.io/pypa/manylinux_2_28_x86_64:latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            container: quay.io/pypa/manylinux_2_28_aarch64:latest
+          - platform: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            container: 'off'
+          - platform: macos-x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            container: 'off'
+          - platform: windows-x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            container: 'off'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build release wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --locked --out dist
+          target: ${{ matrix.target }}
+          container: ${{ matrix.container }}
+          rust-toolchain: '1.96.0'
+          manylinux: '2_28'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  test:
+    name: Test ${{ matrix.platform }} / Python ${{ matrix.python }}
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.14']
+        platform: [linux-x86_64, linux-arm64, macos-arm64, macos-x86_64, windows-x86_64]
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: macos-arm64
+            runner: macos-14
+          - platform: macos-x86_64
+            runner: macos-15-intel
+          - platform: windows-x86_64
+            runner: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: dist
+      - name: Install wheel and run isolated smoke test
+        shell: python {0}
+        run: |
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          wheel, = Path('dist').glob('*.whl')
+          subprocess.run([
+              sys.executable, '-m', 'pip', 'install', '--only-binary=:all:', str(wheel)
+          ], check=True)
+          subprocess.run([
+              sys.executable, '-I', 'scripts/smoke_wheel.py'
+          ], check=True)
+
+  release:
+    name: Publish release wheels
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check release version
+        shell: python {0}
+        run: |
+          import os
+          from pathlib import Path
+          import tomllib
+
+          version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
+          tag = os.environ['RELEASE_TAG']
+          if tag != f'v{version}':
+              raise SystemExit(f'Release tag {tag!r} must match package version v{version}')
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Publish tested wheels
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.whl --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.whl --verify-tag --generate-notes
+          fi
+
+  wheel-index:
+    name: Publish wheel index
+    needs: release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: wheel-index-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/configure-pages@v5
+      - name: List all release assets
+        run: gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" > releases.json
+      - name: Generate wheel index
+        run: python scripts/build_wheel_index.py releases.json wheel-site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: wheel-site
+      - name: Deploy wheel index
+        id: deployment
+        uses: actions/deploy-pages@v4

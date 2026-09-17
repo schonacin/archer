@@ -1,0 +1,697 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "snapshot": {
+      "kind": "WORKTREE"
+    },
+    "source_roots": [
+      "src"
+    ],
+    "diagnostics": [],
+    "modules": [
+      "pkg",
+      "pkg.base",
+      "pkg.use"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "pkg",
+      "kind": "package",
+      "qualified_name": "pkg",
+      "module": "pkg",
+      "file": "src/pkg/__init__.py",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 2,
+          "column": 0
+        }
+      },
+      "metadata": {
+        "fingerprint": "f43c38e70e5a7a526fca1a084304f685adc0b87e5772cfd78f47be2efbe9da64"
+      }
+    },
+    {
+      "id": "pkg.base",
+      "kind": "module",
+      "qualified_name": "pkg.base",
+      "module": "pkg.base",
+      "file": "src/pkg/base.py",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 3,
+          "column": 0
+        }
+      },
+      "metadata": {
+        "fingerprint": "bcd7f04043d591c204bcd130864233f35126214631716e5b901bca05ae7e7a52"
+      }
+    },
+    {
+      "id": "pkg.base.Base",
+      "kind": "class",
+      "qualified_name": "pkg.base.Base",
+      "module": "pkg.base",
+      "file": "src/pkg/base.py",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 2,
+          "column": 20
+        }
+      },
+      "metadata": {
+        "fingerprint": "bcd7f04043d591c204bcd130864233f35126214631716e5b901bca05ae7e7a52"
+      }
+    },
+    {
+      "id": "pkg.base.Base.run",
+      "kind": "method",
+      "qualified_name": "pkg.base.Base.run",
+      "module": "pkg.base",
+      "file": "src/pkg/base.py",
+      "source_range": {
+        "start": {
+          "line": 2,
+          "column": 1
+        },
+        "end": {
+          "line": 2,
+          "column": 20
+        }
+      },
+      "metadata": {
+        "fingerprint": "06a818a55d8b5a2c940bea715fafaa24ec8029accf309c530588047d58268e25"
+      }
+    },
+    {
+      "id": "pkg.use",
+      "kind": "module",
+      "qualified_name": "pkg.use",
+      "module": "pkg.use",
+      "file": "src/pkg/use.py",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 9,
+          "column": 0
+        }
+      },
+      "metadata": {
+        "fingerprint": "4d44d685a0e8d57d62b6d309acb7299b48d909445ab42ce94267ef7be82a1db8"
+      }
+    },
+    {
+      "id": "pkg.use.Child",
+      "kind": "class",
+      "qualified_name": "pkg.use.Child",
+      "module": "pkg.use",
+      "file": "src/pkg/use.py",
+      "source_range": {
+        "start": {
+          "line": 2,
+          "column": 0
+        },
+        "end": {
+          "line": 5,
+          "column": 11
+        }
+      },
+      "metadata": {
+        "fingerprint": "03f56fcc0f3ea10fa23f4eb580f43e791e0845dfdcf8301efc9df4ef5c841ee0"
+      }
+    },
+    {
+      "id": "pkg.use.Child.work",
+      "kind": "method",
+      "qualified_name": "pkg.use.Child.work",
+      "module": "pkg.use",
+      "file": "src/pkg/use.py",
+      "source_range": {
+        "start": {
+          "line": 3,
+          "column": 1
+        },
+        "end": {
+          "line": 5,
+          "column": 11
+        }
+      },
+      "metadata": {
+        "fingerprint": "f8d1a91acd6f519c94e8a070dde214b1556828f6b10ce04b7fb1e0da22cb6984"
+      }
+    },
+    {
+      "id": "pkg.use.outer",
+      "kind": "function",
+      "qualified_name": "pkg.use.outer",
+      "module": "pkg.use",
+      "file": "src/pkg/use.py",
+      "source_range": {
+        "start": {
+          "line": 6,
+          "column": 0
+        },
+        "end": {
+          "line": 8,
+          "column": 8
+        }
+      },
+      "metadata": {
+        "fingerprint": "b39040d250e33e68c8711060b6e92c852a21bc8ad52d6cef1c610eb297d007e2"
+      }
+    },
+    {
+      "id": "pkg.use.outer.inner",
+      "kind": "function",
+      "qualified_name": "pkg.use.outer.inner",
+      "module": "pkg.use",
+      "file": "src/pkg/use.py",
+      "source_range": {
+        "start": {
+          "line": 7,
+          "column": 1
+        },
+        "end": {
+          "line": 7,
+          "column": 18
+        }
+      },
+      "metadata": {
+        "fingerprint": "e0f44c0807dff03fb628645329f103225cb3f468a59c92c8633227778ebc7c9b"
+      }
+    },
+    {
+      "id": "unresolved:3ef68109c548d9b4",
+      "kind": "unresolved",
+      "qualified_name": "missing",
+      "module": "",
+      "file": null,
+      "source_range": null,
+      "metadata": {
+        "expression": "missing",
+        "candidates": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "pkg",
+      "target": "pkg.base",
+      "kind": "contains",
+      "source_range": null,
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": []
+      }
+    },
+    {
+      "source": "pkg",
+      "target": "pkg.base.Base",
+      "kind": "imports",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 18
+        },
+        "end": {
+          "line": 1,
+          "column": 22
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "LibCST lexical binding and repository declaration"
+        ]
+      },
+      "metadata": {
+        "expression": "Base",
+        "sites": [
+          {
+            "start": {
+              "line": 1,
+              "column": 18
+            },
+            "end": {
+              "line": 1,
+              "column": 22
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg",
+      "target": "pkg.use",
+      "kind": "contains",
+      "source_range": null,
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": []
+      }
+    },
+    {
+      "source": "pkg.base",
+      "target": "pkg.base.Base",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 0
+        },
+        "end": {
+          "line": 2,
+          "column": 20
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 1,
+              "column": 0
+            },
+            "end": {
+              "line": 2,
+              "column": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.base.Base",
+      "target": "pkg.base.Base.run",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 2,
+          "column": 1
+        },
+        "end": {
+          "line": 2,
+          "column": 20
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 2,
+              "column": 1
+            },
+            "end": {
+              "line": 2,
+              "column": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use",
+      "target": "pkg.base.Base",
+      "kind": "imports",
+      "source_range": {
+        "start": {
+          "line": 1,
+          "column": 16
+        },
+        "end": {
+          "line": 1,
+          "column": 20
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "LibCST lexical binding and repository declaration"
+        ]
+      },
+      "metadata": {
+        "expression": "Base",
+        "sites": [
+          {
+            "start": {
+              "line": 1,
+              "column": 16
+            },
+            "end": {
+              "line": 1,
+              "column": 20
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use",
+      "target": "pkg.use.Child",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 2,
+          "column": 0
+        },
+        "end": {
+          "line": 5,
+          "column": 11
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 2,
+              "column": 0
+            },
+            "end": {
+              "line": 5,
+              "column": 11
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use",
+      "target": "pkg.use.outer",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 6,
+          "column": 0
+        },
+        "end": {
+          "line": 8,
+          "column": 8
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 6,
+              "column": 0
+            },
+            "end": {
+              "line": 8,
+              "column": 8
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.Child",
+      "target": "pkg.base.Base",
+      "kind": "inherits",
+      "source_range": {
+        "start": {
+          "line": 2,
+          "column": 12
+        },
+        "end": {
+          "line": 2,
+          "column": 13
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "LibCST lexical binding and repository declaration"
+        ]
+      },
+      "metadata": {
+        "expression": "B",
+        "sites": [
+          {
+            "start": {
+              "line": 2,
+              "column": 12
+            },
+            "end": {
+              "line": 2,
+              "column": 13
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.Child",
+      "target": "pkg.use.Child.work",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 3,
+          "column": 1
+        },
+        "end": {
+          "line": 5,
+          "column": 11
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 3,
+              "column": 1
+            },
+            "end": {
+              "line": 5,
+              "column": 11
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.Child.work",
+      "target": "pkg.base.Base.run",
+      "kind": "calls",
+      "source_range": {
+        "start": {
+          "line": 4,
+          "column": 2
+        },
+        "end": {
+          "line": 4,
+          "column": 10
+        }
+      },
+      "resolution": {
+        "status": "strong",
+        "confidence": 0.9,
+        "provider": "archer",
+        "evidence": [
+          "receiver class or inherited member; dynamic dispatch possible"
+        ]
+      },
+      "metadata": {
+        "expression": "self.run",
+        "sites": [
+          {
+            "start": {
+              "line": 4,
+              "column": 2
+            },
+            "end": {
+              "line": 4,
+              "column": 10
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.Child.work",
+      "target": "unresolved:3ef68109c548d9b4",
+      "kind": "calls",
+      "source_range": {
+        "start": {
+          "line": 5,
+          "column": 2
+        },
+        "end": {
+          "line": 5,
+          "column": 9
+        }
+      },
+      "resolution": {
+        "status": "unresolved",
+        "confidence": 0.0,
+        "provider": "archer",
+        "evidence": [
+          "no unique repository declaration"
+        ]
+      },
+      "metadata": {
+        "expression": "missing",
+        "sites": [
+          {
+            "start": {
+              "line": 5,
+              "column": 2
+            },
+            "end": {
+              "line": 5,
+              "column": 9
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.outer",
+      "target": "pkg.use.outer.inner",
+      "kind": "calls",
+      "source_range": {
+        "start": {
+          "line": 8,
+          "column": 1
+        },
+        "end": {
+          "line": 8,
+          "column": 6
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "LibCST lexical binding and repository declaration"
+        ]
+      },
+      "metadata": {
+        "expression": "inner",
+        "sites": [
+          {
+            "start": {
+              "line": 8,
+              "column": 1
+            },
+            "end": {
+              "line": 8,
+              "column": 6
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": "pkg.use.outer",
+      "target": "pkg.use.outer.inner",
+      "kind": "contains",
+      "source_range": {
+        "start": {
+          "line": 7,
+          "column": 1
+        },
+        "end": {
+          "line": 7,
+          "column": 18
+        }
+      },
+      "resolution": {
+        "status": "exact",
+        "confidence": 1.0,
+        "provider": "archer",
+        "evidence": [
+          "declaration"
+        ]
+      },
+      "metadata": {
+        "sites": [
+          {
+            "start": {
+              "line": 7,
+              "column": 1
+            },
+            "end": {
+              "line": 7,
+              "column": 18
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

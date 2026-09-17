@@ -7,6 +7,15 @@ from archer.graph.model import Graph
 def semantic(value):
     data = asdict(value)
     data.pop("source_range", None)
+    # Schema 1.0 graphs named LibCST in this evidence even though Archer owns
+    # resolution. Treat the backend-neutral wording as the same evidence.
+    if "resolution" in data:
+        data["resolution"]["evidence"] = [
+            "lexical binding and repository declaration"
+            if item == "LibCST lexical binding and repository declaration"
+            else item
+            for item in data["resolution"].get("evidence", [])
+        ]
     if data.get("kind") == "unresolved":
         data.pop("qualified_name", None)
     metadata = data.get("metadata", {})
