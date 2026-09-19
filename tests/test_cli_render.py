@@ -147,11 +147,11 @@ def test_nested_package_rendering_engines(tmp_path, layout):
     graph = scan_sources(
         {
             "p/__init__.py": "from .m import C",
-            "p/m.py": "class C:\n def f(self): pass",
+            "p/m.py": "class Base:\n def inherited(self): pass\nclass C(Base):\n class Inner:\n  def run(self): pass\n def f(self): return self.g()\n def g(self): pass\n g(None)",
             "p/sub/use.py": "from p import C\nC()",
         }
     )
-    for level in ("modules", "types", "full"):
+    for level in ("modules", "types", "symbols", "full"):
         output = tmp_path / f"{layout}-{level}.svg"
         render(graph, output, level=level, layout=layout)
         assert ET.parse(output).getroot().tag.endswith("svg")
@@ -300,3 +300,186 @@ def test_parser_flag_overrides_configuration(tmp_path, capsys, invalid):
         config.write_text(f'[tool.archer]\nparser="{backend}"\n')
         assert main(["scan", "--root", str(tmp_path), "-o", "-"]) == 0
         assert json.loads(capsys.readouterr().out) == graph
+
+
+def test_class_containers_and_relationship_endpoints():
+    from archer.graph.algorithms import project
+    from archer.render import nested_nodes
+
+    graph = scan_sources(
+        {
+            "m.py": """class Base: pass
+class Outer(Base):
+    class Inner:
+        def run(self): pass
+    def run(self): return self.helper()
+    def helper(self): pass
+Outer()
+"""
+        }
+    )
+    view = project(graph, "symbols")
+    ids, _ = nested_nodes(view, "symbols")
+    outer = ids["m.Outer"]
+    assert ids["m.Outer.run"].rsplit(".", 1)[0] == outer
+    assert ids["m.Outer.Inner"].startswith(outer + ".")
+    assert ids["m.Outer.Inner.run"].rsplit(".", 1)[0] == ids["m.Outer.Inner"]
+    source = d2_source(graph, "symbols")
+    assert '"contains"' not in source
+    assert f'{ids["m.Outer.run"]} -> {ids["m.Outer.helper"]}: "calls"' in source
+    assert f'{ids["m.Outer"]} -> {ids["m.Base"]}: "inherits"' in source
+
+
+@pytest.mark.parametrize(
+    "body,hidden",
+    [
+        ("", True),
+        ('"Package docs"', True),
+        ("from .m import C", True),
+        ("__all__ = []", False),
+        ("x = 1", False),
+        ("def f(): pass", False),
+        ("class C: pass", False),
+        ("from .m import C\nC()", False),
+        ("import os", False),
+        ("from .missing import C", False),
+        ("def broken(:", False),
+    ],
+)
+def test_initializer_visibility(body, hidden):
+    from archer.graph.model import Graph
+    from archer.render import hidden_initializers
+
+    graph = scan_sources({"p/__init__.py": body, "p/m.py": "class C: pass"})
+    original = graph.to_json()
+    assert ("p" in hidden_initializers(graph, "symbols", "auto")) == hidden
+    assert ('"__init__.py"' not in d2_source(graph, "symbols")) == hidden
+    assert '"__init__.py"' in d2_source(graph, "symbols", initializers="all")
+    assert '"__init__.py"' in d2_source(graph, "full")
+    assert d2_source(Graph.from_dict(graph.to_dict()), "symbols") == d2_source(graph, "symbols")
+    assert graph.to_json() == original
+
+
+def test_initializer_usage_diff_legacy_and_focus(tmp_path):
+    from archer.graph.diff import diff
+
+    sources = {"p/__init__.py": "from .m import C", "p/m.py": "class C: pass"}
+    graph = scan_sources(sources)
+    used = scan_sources({**sources, "use.py": "import p"})
+    assert '"__init__.py"' in d2_source(used)
+    assert '"__init__.py body / imports"' in d2_source(diff(graph, graph))
+    graph.nodes["p"].metadata.pop("structural_initializer")
+    assert '"__init__.py"' in d2_source(graph)
+    assert all(n.metadata["change"] == "unchanged" for n in diff(graph, scan_sources(sources)).nodes.values())
+    (tmp_path / "p").mkdir()
+    (tmp_path / "p/__init__.py").write_text("")
+    assert main(["render", "--format", "d2", "--initializers", "all"]) == 0
+    assert '"__init__.py"' in (tmp_path / "archer/architecture-modules-initializers-all.d2").read_text()
+    assert main(["render", "--format", "d2", "--focus", "p", "--radius", "0"]) == 0
+    assert '"__init__.py"' in (tmp_path / "archer/architecture-modules-focus-p-r0.d2").read_text()
+
+
+def test_class_header_only_for_relationships_with_descendants():
+    from archer.graph.algorithms import project
+    from archer.render import nested_nodes
+
+    graph = scan_sources({"m.py": "class C:\n def f(self): pass\n f(None)\nC()"})
+    view = project(graph, "symbols")
+    ids, lines = nested_nodes(view, "symbols")
+    source = "\n".join(lines)
+    assert ids["m.C"].rsplit(".", 1)[0] == ids["m.C.f"].rsplit(".", 1)[0]
+    header = source.split(ids["m.C"].rsplit(".", 1)[-1] + ":", 1)[1].split("}", 1)[0]
+    assert '"C [class]"' in header
+    assert "shape: text" in header
+    assert "style.bold: true" in header
+    assert '"(class)"' not in source
+    assert f'{ids["m.C"]} -> {ids["m.C.f"]}: "calls"' in d2_source(graph, "symbols")
+
+
+@pytest.mark.parametrize("level", ["types", "symbols", "full"])
+@pytest.mark.parametrize("diff_view", [False, True])
+def test_entity_styles_survive_projection_and_diff(level, diff_view):
+    from archer.graph.algorithms import project
+    from archer.graph.diff import diff
+    from archer.render import nested_nodes
+
+    graph = scan_sources({"p/m.py": "class C:\n def f(self): pass\ndef run(): pass"})
+    if diff_view:
+        graph = diff(graph, scan_sources({}))
+    ids, lines = nested_nodes(project(graph, level), level)
+    source = "\n".join(lines)
+
+    def declaration(ident):
+        return source.split(ident.rsplit(".", 1)[-1] + ":", 1)[1].split("}", 1)[0]
+
+    cls = declaration(ids["p.m.C"])
+    assert "style.border-radius: 10" in cls
+    assert "style.stroke-width: 2" in cls
+    assert "style.border-radius: 0" in declaration(ids["p.m"])
+    if level != "types":
+        for ident in ("p.m.C.f", "p.m.run"):
+            callable_node = declaration(ids[ident])
+            assert "style.border-radius: 20" in callable_node
+            assert "style.stroke-width: 1" in callable_node
+    rendered = d2_source(graph, level)
+    assert "archer_legend:" in rendered
+    assert "[module]" in rendered
+    if diff_view:
+        assert "style.stroke-dash: 4" in cls
+        assert 'style.stroke: "#a16207"' not in cls
+        assert "#fee2e2" in cls
+        assert "Red: removed" in rendered
+    else:
+        assert "Colors: subsystems" in rendered
+
+
+@pytest.mark.parametrize("level", ["modules", "types", "symbols", "full"])
+def test_diff_container_summaries_and_direct_body_colors(level):
+    from archer.graph.algorithms import changes, project
+    from archer.graph.diff import diff
+    from archer.render import nested_nodes
+
+    old = scan_sources({"p/m.py": "class C:\n def f(self): return 1\ndef run(): return 1"})
+    new = scan_sources({"p/m.py": "class C:\n def f(self): return 2\ndef run(): return 2"})
+    delta = changes(diff(old, new), radius=0)
+    ids, lines = nested_nodes(project(delta, level), level)
+    source = "\n".join(lines)
+    module_leaf = source.split(ids["p.m"].rsplit(".", 1)[-1] + ":", 1)[1].split("}", 1)[0]
+    assert "#fef3c7" not in module_leaf
+    assert "1 function modified, 1 method modified" in source
+    if level == "modules":
+        assert 'style.stroke: "#a16207"' in module_leaf
+    else:
+        # The module body stays neutral; only the enclosing scope gets amber.
+        assert 'style.stroke: "#a16207"' not in module_leaf
+        container = source.split('"m [module]', 1)[1].split("}", 1)[0]
+        assert 'style.stroke: "#a16207"' in container
+        cls_style = source.split(ids["p.m.C"].rsplit(".", 1)[-1] + ":", 1)[1].split("}", 1)[0]
+        assert 'style.stroke: "#a16207"' in cls_style
+    if level in {"symbols", "full"}:
+        cls = source.split(ids["p.m.C"].rsplit(".", 1)[-1] + ":", 1)[1]
+        assert "1 method modified" in cls
+        # Only changed callable leaves are amber, never the module/class containers.
+        assert source.count('style.fill: "#fef3c7"') == 2
+        assert "module body / imports" in module_leaf
+    else:
+        assert "#fef3c7" not in source
+
+    new = scan_sources({"p/m.py": "x = 2\nclass C:\n def f(self): return 2\ndef run(): return 2"})
+    delta = diff(old, new)
+    ids, lines = nested_nodes(project(delta, level), level)
+    module_leaf = "\n".join(lines).split(ids["p.m"].rsplit(".", 1)[-1] + ":", 1)[1].split("}", 1)[0]
+    assert "#fef3c7" in module_leaf
+    assert "module body / imports" in module_leaf
+
+
+def test_legacy_diff_labels_unknown_scope():
+    from archer.graph.diff import diff
+
+    old = scan_sources({"m.py": "def f(): return 1"})
+    for node in old.nodes.values():
+        node.metadata.pop("direct_fingerprint", None)
+    delta = diff(old, scan_sources({"m.py": "def f(): return 2"}))
+    source = d2_source(delta, "symbols")
+    assert "file changes (scope unknown)" in source
+    assert "change scope unknown" in source

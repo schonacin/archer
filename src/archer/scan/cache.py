@@ -13,7 +13,7 @@ from pathlib import Path
 from archer.graph.model import Edge, Graph, Node, validate_range
 from archer.scan.facts import ParsedModuleFacts
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 DEFAULT_MAX_BYTES = 512 * 1024 * 1024
 MAX_ENTRY_BYTES = 16 * 1024 * 1024
 MAX_AGE_SECONDS = 30 * 24 * 60 * 60
@@ -105,7 +105,14 @@ def decode(payload, module, file):
         if not isinstance(data[key], dict) or not all(isinstance(k, str) for k in data[key]):
             raise ValueError("Invalid bindings")
         maps.append({k: strings(v) for k, v in data[key].items()})
-    return ParsedModuleFacts(nodes, edges, pending, *maps, strings(data["rebindings"])), fingerprint
+    direct = data["direct_fingerprints"]
+    if not isinstance(direct, dict):
+        raise TypeError("Invalid direct fingerprints")
+    for ident, digest in direct.items():
+        if not isinstance(ident, str) or not isinstance(digest, str) or len(digest) != 64:
+            raise ValueError("Invalid direct fingerprint")
+        int(digest, 16)
+    return ParsedModuleFacts(nodes, edges, pending, *maps, strings(data["rebindings"]), direct), fingerprint
 
 
 class FactsCache:

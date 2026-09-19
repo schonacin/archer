@@ -76,3 +76,61 @@ def test_resolution_change_classifies_edge_modified():
     edge = next(e for e in diff(a, b).edges if e.kind == "calls")
     assert edge.metadata["change"] == "modified"
     assert edge.metadata["before"]["resolution"]["status"] == "exact"
+
+
+def test_direct_changes_do_not_charge_owners_for_descendant_bodies():
+    before = scan_sources({"p/m.py": "class C:\n def f(self): return 1\ndef g(): return 1"})
+    after = scan_sources({"p/m.py": "class C:\n def f(self): return 2\ndef g(): return 2"})
+    delta = diff(before, after)
+    assert delta.nodes["p.m"].metadata["change"] == "modified"
+    assert delta.nodes["p.m"].metadata["direct_change"] == "unchanged"
+    assert delta.nodes["p.m.C"].metadata["direct_change"] == "unchanged"
+    assert delta.nodes["p.m.C.f"].metadata["direct_change"] == "modified"
+    assert delta.nodes["p.m.g"].metadata["direct_change"] == "modified"
+    summary = [
+        {"kind": "function", "change": "modified", "count": 1},
+        {"kind": "method", "change": "modified", "count": 1},
+    ]
+    assert delta.nodes["p.m"].metadata["descendant_changes"] == summary
+    assert delta.nodes["p"].metadata["descendant_changes"] == summary
+    assert project(changes(delta, 0), "modules").nodes["p.m"].metadata["descendant_changes"] == summary
+
+
+def test_direct_body_imports_and_definition_headers():
+
+    # Each edit must remain attributed even if there are also child changes.
+    for old, new, owner in [
+        ("x = 1\ndef f(): return 1", "x = 2\ndef f(): return 2", "m"),
+        ("import a\ndef f(): pass", "import b\ndef f(): pass", "m"),
+        ("class C(A):\n def f(self): return 1", "class C(B):\n def f(self): return 2", "m.C"),
+        ("def f(a=1): return 1", "def f(a=2): return 1", "m.f"),
+        ("@a\ndef f(): pass", "@b\ndef f(): pass", "m.f"),
+        ("async def f(): return 1", "async def f(): return 2", "m.f"),
+    ]:
+        delta = diff(scan_sources({"m.py": old}), scan_sources({"m.py": new}))
+        assert delta.nodes[owner].metadata["direct_change"] == "modified"
+        if owner != "m":
+            assert delta.nodes["m"].metadata["direct_change"] == "unchanged"
+
+
+def test_added_removed_nested_symbols_count_without_modifying_parent_body():
+    old = "def outer():\n def gone(): return 1\n return 0"
+    new = "def outer():\n def added(): return 2\n return 0"
+    delta = diff(scan_sources({"m.py": old}), scan_sources({"m.py": new}))
+    assert delta.nodes["m"].metadata["direct_change"] == "unchanged"
+    assert delta.nodes["m.outer"].metadata["direct_change"] == "unchanged"
+    assert delta.nodes["m.outer"].metadata["descendant_changes"] == [
+        {"kind": "function", "change": "added", "count": 1},
+        {"kind": "function", "change": "removed", "count": 1},
+    ]
+
+
+def test_missing_attribution_is_unknown_without_false_legacy_changes():
+    old = scan_sources({"m.py": "def f(): return 1"})
+    current = scan_sources({"m.py": "def f(): return 1"})
+    for node in old.nodes.values():
+        node.metadata.pop("direct_fingerprint", None)
+    assert all(n.metadata["change"] == "unchanged" for n in diff(old, current).nodes.values())
+    changed = diff(old, scan_sources({"m.py": "def f(): return 2"}))
+    assert changed.nodes["m"].metadata["direct_change"] == "unknown"
+    assert changed.nodes["m.f"].metadata["direct_change"] == "unknown"

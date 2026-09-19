@@ -77,6 +77,12 @@ def parser():
             cmd.add_argument("--focus", help="Exact module, symbol ID or qualified name")
         if name == "render":
             cmd.add_argument(
+                "--initializers",
+                choices=["auto", "all"],
+                default="auto",
+                help="Show meaningful package initializers (auto) or every initializer (all)",
+            )
+            cmd.add_argument(
                 "--exclude-arrows",
                 action="append",
                 default=[],
@@ -242,6 +248,8 @@ def default_output(args, graph):
         ):
             for module in modules:
                 parts.extend(["without-arrows" + direction, module])
+        if args.initializers != "auto":
+            parts.append("initializers-" + args.initializers)
         if args.external and args.level not in {"full", "changes"}:
             parts.append("external")
         if not args.color_arrows and not is_diff:
@@ -350,6 +358,7 @@ def run(args):
         if not found:
             raise ValueError(f"Unknown focus: {args.focus}")
         graph = neighborhood(graph, {n.module for n in found}, args.radius, args.direction)
+        graph.metadata["focused"] = True
     if args.command == "render":
         requested_modules = {
             *args.exclude_arrows,
@@ -377,6 +386,7 @@ def run(args):
                     args.exclude_arrows,
                     args.exclude_arrows_to,
                     args.exclude_arrows_from,
+                    args.initializers,
                 ),
                 args.output,
             )
@@ -397,6 +407,7 @@ def run(args):
                     exclude_arrows=args.exclude_arrows,
                     exclude_arrows_to=args.exclude_arrows_to,
                     exclude_arrows_from=args.exclude_arrows_from,
+                    initializers=args.initializers,
                 )
                 if output == Path("-"):
                     sys.stdout.buffer.write(target.read_bytes())

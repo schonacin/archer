@@ -41,6 +41,7 @@ def test_hits_skip_extraction_and_fingerprints(tmp_path, monkeypatch, backend):
 
     monkeypatch.setattr(scanner, "get_parser", lambda name: unexpected)
     monkeypatch.setattr(scanner, "fingerprint", unexpected)
+    monkeypatch.setattr(scanner, "direct_fingerprints", unexpected)
     warm = scan_sources(sources, parser=backend, cache_dir=tmp_path)
     assert warm.to_dict() == cold.to_dict()
     assert cache_info(tmp_path)["entries"] == 1
@@ -116,7 +117,7 @@ def test_expiry_and_obsolete_formats(tmp_path, monkeypatch):
     assert cache_info(tmp_path)["entries"] == 0
     cache.put("obsolete", facts(), "0" * 64)
     cache.close()
-    monkeypatch.setattr(cache_module, "FORMAT_VERSION", 2)
+    monkeypatch.setattr(cache_module, "FORMAT_VERSION", cache_module.FORMAT_VERSION + 1)
     cache = FactsCache(tmp_path)
     cache.close()
     assert cache_info(tmp_path)["entries"] == 0

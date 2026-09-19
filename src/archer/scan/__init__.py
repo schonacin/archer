@@ -1,5 +1,6 @@
 """Scan filesystem or immutable in-memory snapshots without importing project code."""
 
+import ast
 import fnmatch
 import hashlib
 import io
@@ -11,10 +12,27 @@ from pathspec import GitIgnoreSpec
 
 from archer.graph.model import Edge, Graph, Node, resolution
 from archer.scan.cache import FactsCache, backend_identity, cache_key
+from archer.scan.facts import direct_fingerprints
 from archer.scan.parser import ExtractionLimitError, fingerprint, get_parser
 from archer.scan.resolver import Resolver
 
 EXCLUDED = {".git", ".venv", "venv", "env", "__pycache__", "node_modules", "build", "dist", ".tox", ".archer"}
+
+
+def initializer_is_structural(source):
+    """Conservatively recognize only docstrings and imports."""
+    try:
+        body = ast.parse(source).body
+    except (SyntaxError, RecursionError, ValueError):
+        return False
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    return all(isinstance(statement, (ast.Import, ast.ImportFrom)) for statement in body)
 
 
 def ignore_spec(root):
@@ -121,6 +139,7 @@ def scan_sources(
                 if cached is None:
                     facts = extract(source, module, file)
                     digest = fingerprint(source)
+                    facts.direct_fingerprints = direct_fingerprints(source, module)
                     if fact_cache is not None:
                         fact_cache.put(key, facts, digest)
                 else:
@@ -141,6 +160,11 @@ def scan_sources(
                     },
                     {"fingerprint": digest},
                 )
+                if node.kind == "package":
+                    node.metadata["structural_initializer"] = initializer_is_structural(source)
+                for declaration in (node, *facts.nodes.values()):
+                    if direct := facts.direct_fingerprints.get(declaration.id):
+                        declaration.metadata["direct_fingerprint"] = direct
                 graph.nodes[module] = node
                 graph.nodes.update(facts.nodes)
                 graph.edges.extend(facts.edges)
