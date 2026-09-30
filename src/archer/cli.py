@@ -126,8 +126,18 @@ def parser():
                 const="raw",
                 help="Alias for --svg-optimization raw",
             )
-            cmd.add_argument("--format", choices=["d2", "svg", "png", "pdf"], default="svg")
+            cmd.add_argument("--format", choices=["d2", "svg", "png", "pdf", "html"], default="svg")
             cmd.add_argument("--layout", choices=["auto", "tala", "elk", "dagre"], default="auto")
+            cmd.add_argument(
+                "--html-node-shape",
+                choices=["bucketed", "square"],
+                help="Expandable card aspect ratios for HTML (default: bucketed; HTML only)",
+            )
+            cmd.add_argument(
+                "--html-view-mode",
+                choices=["standard", "isolated"],
+                help="HTML detail scenes: standard or locally encapsulated isolated views",
+            )
             cmd.add_argument(
                 "--external", action="store_true", help="Include unresolved/external nodes in projected views"
             )
@@ -217,7 +227,13 @@ def default_output(args, graph):
     if args.command in {"scan", "diff"}:
         parts, extension = ["graph"], "json"
     else:
-        parts = ["architecture" if args.command == "render" else "context"]
+        parts = [
+            "architecture-explorer"
+            if args.command == "render" and args.format == "html"
+            else "architecture"
+            if args.command == "render"
+            else "context"
+        ]
         extension = args.format if args.command == "render" else "md"
     if is_diff:
         parts.append("diff" if args.command in {"scan", "diff"} else "changes")
@@ -233,7 +249,8 @@ def default_output(args, graph):
         elif before.get("revision") and after.get("revision"):
             parts.append(before["revision"][:8] + "-to-" + after["revision"][:8])
     if args.command in {"render", "context"}:
-        parts.append("full" if args.level == "changes" else args.level)
+        if not (args.command == "render" and args.format == "html"):
+            parts.append("full" if args.level == "changes" else args.level)
         if args.focus:
             parts.extend(["focus", filename_part(args.focus)])
         if args.focus or args.changes or args.level == "changes":
@@ -254,8 +271,12 @@ def default_output(args, graph):
             parts.append("external")
         if not args.color_arrows and not is_diff:
             parts.append("plain-arrows")
-        if args.svg_optimization != "fast" and args.format == "svg":
+        if args.svg_optimization != "fast" and args.format in {"svg", "html"}:
             parts.append(args.svg_optimization)
+        if args.format == "html" and args.html_node_shape == "square":
+            parts.append("square")
+        if args.format == "html" and args.html_view_mode == "isolated":
+            parts.append("isolated")
     return Path("archer") / ("-".join(filename_part(p) for p in parts) + "." + extension)
 
 
@@ -323,6 +344,22 @@ def run(args):
     if args.command == "skill":
         emit(files("archer").joinpath("skills/archer/SKILL.md").read_text())
         return 0
+    if args.command == "render":
+        if args.format != "html" and args.html_node_shape is not None:
+            raise ValueError("--html-node-shape can only be used with --format html")
+        if args.format != "html" and args.html_view_mode is not None:
+            raise ValueError("--html-view-mode can only be used with --format html")
+        if args.format == "html":
+            if args.level != "modules":
+                raise ValueError(
+                    "HTML always contains the complete three-level hierarchy; use --level modules"
+                )
+            if args.changes or args.mode:
+                raise ValueError(
+                    "HTML semantic zoom does not support Git changes or snapshot comparison switches"
+                )
+            args.html_node_shape = args.html_node_shape or "bucketed"
+            args.html_view_mode = args.html_view_mode or "standard"
     kwargs = configuration(args)
     mode = getattr(args, "mode", None)
     baseline = None
@@ -360,6 +397,8 @@ def run(args):
         graph = neighborhood(graph, {n.module for n in found}, args.radius, args.direction)
         graph.metadata["focused"] = True
     if args.command == "render":
+        if args.format == "html" and graph.metadata.get("diff"):
+            raise ValueError("HTML semantic zoom does not support saved diff graphs")
         requested_modules = {
             *args.exclude_arrows,
             *args.exclude_arrows_to,
@@ -396,19 +435,37 @@ def run(args):
                 raise ValueError("Output extension must match --format")
             with tempfile.TemporaryDirectory(prefix="archer-stdout-") as directory:
                 target = Path(directory) / ("output." + args.format) if output == Path("-") else output
-                report = render(
-                    graph,
-                    target,
-                    level=args.level,
-                    external=args.external,
-                    layout=args.layout,
-                    color_arrows=args.color_arrows,
-                    svg_optimization=args.svg_optimization,
-                    exclude_arrows=args.exclude_arrows,
-                    exclude_arrows_to=args.exclude_arrows_to,
-                    exclude_arrows_from=args.exclude_arrows_from,
-                    initializers=args.initializers,
-                )
+                if args.format == "html":
+                    from archer.render.html import render_html
+
+                    report = render_html(
+                        graph,
+                        target,
+                        external=args.external,
+                        layout=args.layout,
+                        color_arrows=args.color_arrows,
+                        svg_optimization=args.svg_optimization,
+                        exclude_arrows=args.exclude_arrows,
+                        exclude_arrows_to=args.exclude_arrows_to,
+                        exclude_arrows_from=args.exclude_arrows_from,
+                        initializers=args.initializers,
+                        node_shape=args.html_node_shape,
+                        view_mode=args.html_view_mode,
+                    )
+                else:
+                    report = render(
+                        graph,
+                        target,
+                        level=args.level,
+                        external=args.external,
+                        layout=args.layout,
+                        color_arrows=args.color_arrows,
+                        svg_optimization=args.svg_optimization,
+                        exclude_arrows=args.exclude_arrows,
+                        exclude_arrows_to=args.exclude_arrows_to,
+                        exclude_arrows_from=args.exclude_arrows_from,
+                        initializers=args.initializers,
+                    )
                 if output == Path("-"):
                     sys.stdout.buffer.write(target.read_bytes())
                     report["output"] = "stdout"

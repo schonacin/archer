@@ -21,6 +21,9 @@ semantic = ["pyright>=1.1.400,<2"]
 all = ["archer[render,semantic,libcst]"]
 test = ["libcst>=1.5,<2","pytest>=8,<10", "ruff>=0.11,<1", "resvg-py>=0.5,<1", "pillow>=12,<13"]
 
+[dependency-groups]
+browser-test = ["playwright>=1.55,<2"]
+
 [project.scripts]
 archer = "archer.cli:main"
 
@@ -34,7 +37,7 @@ line-length = 110
 manifest-path = "native/Cargo.toml"
 python-source = "src"
 module-name = "archer._native"
-include = ["src/archer/skills/**/*", "rust-toolchain.toml"]
+include = ["src/archer/skills/**/*", "src/archer/render/assets/**/*", "rust-toolchain.toml"]
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "rust-toolchain.toml" }, { file = "native/Cargo.toml" }, { file = "native/Cargo.lock" }, { file = "native/src/**/*.rs" }]

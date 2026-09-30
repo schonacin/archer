@@ -1,6 +1,6 @@
 # Archer
 
-Archer 0.1 builds a static architecture graph of a Python repository, renders D2 diagrams, produces bounded agent context, compares Git snapshots, and checks dependency structure. It never imports or executes the scanned project.
+Archer 0.1 builds a static architecture graph of a Python repository, renders D2 diagrams and an offline semantic-zoom explorer, produces bounded agent context, compares Git snapshots, and checks dependency structure. It never imports or executes the scanned project.
 
 > **Development disclaimer:** Archer was coded solely by AI, with human planning and steering.
 
@@ -29,7 +29,7 @@ uv tool install '.[all]'
 
 Append `@TAG_OR_COMMIT` to the Git URL to pin an installation. For example, a tagged release can use `git+https://github.com/schonacin/archer.git@v0.1`. Upgrade a uv installation by repeating the command with `--force`.
 
-The base package includes a Rust extension using pinned Ruff crates and depends on NetworkX. Source/Git installs require the pinned Rust 1.96.0 toolchain and a C compiler; install Rust with [rustup](https://rustup.rs/). Prebuilt wheels do not require Rust. Extras are `libcst`, `render`, `semantic`, and `all`; the render extra is currently empty because D2 is an external executable. The semantic extra installs Pyright for future integration, but semantic enrichment is **not enabled in v1**. Install [D2](https://d2lang.com/tour/install/) separately for SVG, PNG, and PDF output; `--format d2` does not need it. Run `archer doctor` after installation to inspect available tools and layouts.
+The base package includes a Rust extension using pinned Ruff crates and depends on NetworkX. Source/Git installs require the pinned Rust 1.96.0 toolchain and a C compiler; install Rust with [rustup](https://rustup.rs/). Prebuilt wheels do not require Rust. Extras are `libcst`, `render`, `semantic`, and `all`; the render extra is currently empty because D2 is an external executable. The semantic extra installs Pyright for future integration, but semantic enrichment is **not enabled in v1**. Install [D2](https://d2lang.com/tour/install/) separately for SVG, PNG, PDF, and HTML output; HTML requires D2 0.9.0 or newer and validates the 0.9 SVG adapter contract on every scene. `--format d2` does not need D2 installed. Run `archer doctor` after installation to inspect available tools and layouts.
 
 The `Build wheels` GitHub Actions workflow builds Linux x86_64/ARM64 (glibc 2.28+), macOS Intel/Apple Silicon, and Windows x86_64 wheels. It runs on pull requests, `v*` tag pushes, and manual dispatch. Each wheel is tested on standard CPython 3.11 and 3.14 with Rust hidden from `PATH`. Download the corresponding `wheels-PLATFORM` artifact from the workflow run, unzip it, and install its `.whl` file with `python -m pip install /path/to/archer-....whl`.
 
@@ -63,7 +63,7 @@ Archer has eight commands:
 | Command | Purpose |
 |---|---|
 | `scan` | Scan Python without importing it and write the canonical versioned JSON graph. |
-| `render` | Project a graph and render D2 source, SVG, PNG, or PDF. |
+| `render` | Project a graph and render D2 source, SVG, PNG, PDF, or a portable HTML explorer. |
 | `context` | Produce bounded Markdown architecture context for a human or coding agent. |
 | `diff [REV_A REV_B]` | Compare two Git snapshots as a semantic graph diff. |
 | `check` | Check cycles, fan-in/out, and increased coupling against an optional baseline. |
@@ -167,11 +167,17 @@ Without a mode, `diff` and `--changes` use `HEAD` → working tree. Worktree sna
 | `--color-arrows true\|false` | Color arrows by their source subsystem (default `true`; a bare flag also enables it). Git-change diagrams retain change colors. |
 | `--svg-optimization raw\|medium\|fast` | SVG post-processing level; default `fast`. |
 | `--no-optimize-svg` | Alias for `--svg-optimization raw`; mutually exclusive with that flag. |
-| `--format d2\|svg\|png\|pdf` | Output format; default `svg`. |
+| `--format d2\|svg\|png\|pdf\|html` | Output format; default `svg`. |
 | `--layout auto\|tala\|elk\|dagre` | D2 layout engine; default `auto`. |
+| `--html-node-shape bucketed\|square` | Expandable-card aspect ratios for HTML; default `bucketed`. HTML only. |
+| `--html-view-mode standard\|isolated` | Use the standard three-level scenes or locally encapsulated detail scenes; default `standard`. HTML only. |
 | `--external` | Include external and unresolved nodes in projected views. Full views already include them. |
 
-Module diagrams hide containment arrows and combine parallel relationship labels. Arrow exclusions retain nodes, apply to module subtrees at every detail level, and may be repeated for several modules. D2 source output works without D2; image and PDF output require the external executable. An explicit output extension must match `--format`.
+Module diagrams hide containment arrows and combine parallel relationship labels. Arrow exclusions retain nodes, apply to module subtrees at every detail level, and may be repeated for several modules. D2 source output works without D2; image, PDF, and HTML output require the external executable. An explicit output extension must match `--format`.
+
+`--format html` produces one self-contained file with independently rendered module, type, and class-member scenes. Open it directly with `file://`; it makes no network requests. `--html-view-mode isolated` gives detail scenes a fitted owner border, removes cross-boundary context and relationships, includes module-level functions, and links modules without classes directly to a module-symbol scene. Class symbol frames use rounded corners; module/type frames are rectangular. Pair it with `--html-node-shape square` for square parent cards and square encapsulation frames during the two-SVG overlap transition. After a transition, visible ancestor SVGs remain as camera-linked underlays in uncovered viewport regions; each stops rendering while the active opaque frame covers the viewport or that ancestor is off-screen, and can reappear during zoom-out. The default `standard` mode retains the original complete three-level hierarchy and boundary context.
+
+Zooming into an expandable card automatically descends once the card fills the viewport; the candidate is the selected card, then the card under the pointer, then the eligible card nearest the viewport center. No click is required. Isolated views preserve the card's current screen position during entry and map back from the current child pose during exit instead of recentering either scene. The **Semantic zoom** controls adjust the entry occupancy percentage and exit percentage of fitted inner-view scale; settings are saved when browser storage is available. Double-click, Enter, or **Open selected** also descend explicitly. Wheel/pinch or `+`/`-` zoom can trigger semantic descent and ascent. Arrow keys pan with progressively smaller screen-space steps at higher magnification; their base speed and retained speed per 2× zoom are adjustable under **Keyboard navigation**. Navigation shortcuts continue working when focus returns to the selected sidebar item after ascent. Home fits the current scene. Drag pans the view, while Back/Escape and breadcrumbs ascend. HTML accepts the default `--level modules` because the hierarchy is embedded. Other levels, Git comparisons, and diff graphs are rejected. Focus, initializer visibility, arrow exclusions/coloring, layout, and SVG optimization still apply. `--external` affects standard views; isolated detail views deliberately omit outside entities regardless of it.
 
 ### `context`
 
@@ -215,6 +221,8 @@ Artifact-producing commands write under `archer/` in the **current working direc
 | `archer diff --unstaged` | `archer/graph-diff-unstaged.json` |
 | `archer diff REV_A REV_B` | `archer/graph-diff-SHA_A-to-SHA_B.json` (eight-character revisions) |
 | `archer render` | `archer/architecture-modules.svg` |
+| `archer render --format html` | `archer/architecture-explorer.html` |
+| `archer render --format html --html-node-shape square` | `archer/architecture-explorer-square.html` |
 | `archer render --level types --format d2` | `archer/architecture-types.d2` |
 | `archer render --changes --level symbols --radius 1` | `archer/architecture-changes-worktree-symbols-r1.svg` |
 | `archer context` | `archer/context-modules.md` |
