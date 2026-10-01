@@ -39,7 +39,7 @@ cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings
 uv build
 ```
 
-Maturin builds the mixed package with a PyO3 `abi3-py311` extension. Source installs compile Rust; wheels require a compatible OS/architecture but no Rust toolchain. Docker builds the extension in a build stage and copies the installed environment into the runtime stage. Ruff crates are pinned to 0.0.12, PyO3 to 0.28.2, and the toolchain to 1.96.0; the source includes `native/Cargo.lock`. Upgrade them intentionally and rerun parity tests. Ruff's component crates are [internal APIs without stability guarantees](https://docs.rs/ruff_python_parser/0.0.12/ruff_python_parser/).
+Maturin builds the mixed package with a PyO3 `abi3-py311` extension. Source installs compile Rust; wheels require a compatible OS/architecture but no Rust toolchain. Docker builds the extension in a build stage and copies the installed environment into the runtime stage. Ruff crates are pinned to 0.0.15, PyO3 to 0.28.2, and the toolchain to 1.96.0; the source includes `native/Cargo.lock`. Upgrade them intentionally and rerun parity tests. Ruff's component crates are [internal APIs without stability guarantees](https://docs.rs/ruff_python_parser/0.0.15/ruff_python_parser/).
 
 ## Measuring performance
 

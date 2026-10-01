@@ -86,3 +86,11 @@ This is about 16.5× on this small repository, not a general speed guarantee. Di
 The cache suite covers warm/cold IR equality for both backends, full-source and context invalidation, object isolation, physical disk-size limits, LRU eviction, expiry, format cleanup, oversized entries, corrupt entries/databases, lock contention, concurrent writers, disabled caching, and CLI controls. Git tests prove that unchanged callers reuse extraction facts while resolving changed dependencies, and compare cached/uncached graphs and diffs for commits, index, worktree, renames, and deletions.
 
 A local run over 29 Python files measured 0.231 seconds cold, 0.050 seconds warm (median of three), and 0.198 seconds without caching, with identical IR. This measures scanning after reading sources into memory; results depend on repository size and storage. Parser-only benchmarks now explicitly disable caching.
+
+## Ruff parser upgrade validation (2026-10-01)
+
+- Ruff component crates upgraded from 0.0.12 to 0.0.15 with Rust 1.96.0 unchanged.
+- All 195 tests pass on Linux x86_64 with Python 3.12.14, including Rust/LibCST parity, saved-graph compatibility, cache coverage, and actual D2 rendering.
+- Ruff lint, Rustfmt, and Clippy with warnings denied pass; `uv sync --locked --extra all --extra test` succeeds.
+- `uv build` produces the source distribution and a CPython 3.11+ ABI3 Linux x86_64 wheel. The wheel installs in a clean base-only environment and passes `scripts/smoke_wheel.py` with Rust hidden from `PATH` and LibCST absent.
+- Other platform wheels and Python versions remain covered by the GitHub Actions wheel workflow; they were not exercised locally for this upgrade.
