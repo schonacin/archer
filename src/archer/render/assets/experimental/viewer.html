@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Archer · Architecture map</title><style>{{STYLE}}</style></head>
+<body>
+<header><a class="brand" href="#" id="brand" aria-label="Architecture overview"><span class="mark"><svg width="19" height="19" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 16L15 5M5 5h10v10" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></span> archer <span class="brand-sub">/ map</span></a><span class="experiment">EXPERIMENTAL</span><div class="header-space"></div><button id="back" title="Back (Alt + Left)">← Back</button><button id="overview" title="Overview (Home)">Overview</button><button id="fit" title="Fit current region (F)">Fit region</button><button id="panel-toggle" aria-label="Toggle explorer" aria-expanded="true">Explorer ☰</button></header>
+<main>
+<section id="canvas" aria-label="Interactive architecture map" tabindex="0">
+<div class="map-top"><nav id="breadcrumbs" aria-label="Architecture location"></nav><span id="level-hint"></span></div>
+<svg id="map" aria-label="Code architecture"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9" fill="none" stroke="context-stroke" stroke-width="1.5"/></marker></defs><g id="world"></g><g id="labels"></g></svg>
+<div id="empty" hidden><h1>No source entities</h1><p>Try scanning a source directory or widening the current focus.</p></div>
+<div class="map-bottom"><div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">−</button><output id="zoom-value">100%</output><button id="zoom-in" aria-label="Zoom in">+</button></div><div class="connection-controls"><button id="connections" aria-pressed="true">Connections <span>on</span></button><label for="connection-opacity">Strength</label><input id="connection-opacity" type="range" min="0" max="80" value="24" aria-label="Connection strength"><output id="connection-value">24%</output></div><span id="gesture-hint">Scroll to zoom · drag to explore</span></div>
+<svg id="minimap" aria-label="Overview locator" viewBox="0 0 180 110"><g id="mini-nodes"></g><rect id="mini-viewport"/></svg>
+<div id="live" class="sr-only" aria-live="polite"></div>
+</section>
+<aside id="explorer"><div class="search-wrap"><label class="sr-only" for="search">Find a module, class or function</label><span>⌕</span><input id="search" type="search" placeholder="Find anything…" autocomplete="off"><kbd>/</kbd></div><div id="search-results" hidden></div>
+<section id="inspector" hidden><div class="section-heading">SELECTED</div><div id="selection-kind"></div><h2 id="selection-name"></h2><p id="source"></p><button id="enter-selection">Enter region ↗</button><div class="relationship-tabs"><button id="uses" aria-pressed="true">Uses <span></span></button><button id="used-by" aria-pressed="false">Used by <span></span></button></div><div id="relationships"></div></section>
+<div class="section-heading"><span id="list-heading">EXPLORE</span><span id="child-count"></span></div><div id="children"></div>
+
+<div class="sidebar-footer"><div class="type-legend"><span data-kind="package">▧ Package</span><span data-kind="module">M Module</span><span data-kind="class">C Class</span><span data-kind="function">ƒ Function / method</span></div><span id="summary"></span><details><summary>Navigation help</summary><p>Scroll or pinch to zoom. Drag or use two-finger scrolling to pan. Double-click a region to enter it.</p><p>Connections resolve to deeper entities as details appear. Arrows leaving the view end at named boundary ports; click a port to follow it. Strength adjusts background arrows; selection stays highlighted.</p><p><kbd>F</kbd> fit · <kbd>Home</kbd> overview · <kbd>Esc</kbd> parent · <kbd>Alt ←</kbd> back · <kbd>/</kbd> search</p></details><div id="diagnostics" hidden></div></div>
+</aside>
+</main>
+<script id="map-data" type="application/json">{{DATA}}</script>
+<!-- D3 7.9.0 license:
+{{LICENSE}}
+-->
+<script>{{D3}}</script><script>{{SCRIPT}}</script>
+</body></html>

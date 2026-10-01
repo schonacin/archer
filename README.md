@@ -169,11 +169,14 @@ Without a mode, `diff` and `--changes` use `HEAD` → working tree. Worktree sna
 | `--no-optimize-svg` | Alias for `--svg-optimization raw`; mutually exclusive with that flag. |
 | `--format d2\|svg\|png\|pdf\|html` | Output format; default `svg`. |
 | `--layout auto\|tala\|elk\|dagre` | D2 layout engine; default `auto`. |
+| `--html-viewer classic\|experimental` | HTML viewer; default `classic`. Experimental uses a separate offline D3 architecture map. |
 | `--html-node-shape bucketed\|square` | Expandable-card aspect ratios for HTML; default `bucketed`. HTML only. |
 | `--html-view-mode standard\|isolated` | Use the standard three-level scenes or locally encapsulated detail scenes; default `standard`. HTML only. |
 | `--external` | Include external and unresolved nodes in projected views. Full views already include them. |
 
 Module diagrams hide containment arrows and combine parallel relationship labels. Arrow exclusions retain nodes, apply to module subtrees at every detail level, and may be repeated for several modules. D2 source output works without D2; image, PDF, and HTML output require the external executable. An explicit output extension must match `--format`.
+
+An opt-in D3 map is available with `archer render --format html --html-viewer experimental --layout tala`. It uses its own exporter and assets, draws fresh graphics from reference geometry, supports package/module/class/function ownership at arbitrary depth, and adds search, dependency inspection, continuous zoom and a minimap. Its default filename ends in `-experimental.html`. The classic viewer remains unchanged and is still the default. See [the experimental map guide](docs/EXPERIMENTAL_MAP.md) for navigation, layout choices and current limits.
 
 `--format html` produces one self-contained file with independently rendered module, type, and class-member scenes. Open it directly with `file://`; it makes no network requests. `--html-view-mode isolated` gives detail scenes a fitted owner border, removes cross-boundary context and relationships, includes module-level functions, and links modules without classes directly to a module-symbol scene. Class symbol frames use rounded corners; module/type frames are rectangular. Pair it with `--html-node-shape square` for square parent cards and square encapsulation frames during the two-SVG overlap transition. After a transition, visible ancestor SVGs remain as camera-linked underlays in uncovered viewport regions; each stops rendering while the active opaque frame covers the viewport or that ancestor is off-screen, and can reappear during zoom-out. The default `standard` mode retains the original complete three-level hierarchy and boundary context.
 

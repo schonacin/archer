@@ -129,6 +129,12 @@ def parser():
             cmd.add_argument("--format", choices=["d2", "svg", "png", "pdf", "html"], default="svg")
             cmd.add_argument("--layout", choices=["auto", "tala", "elk", "dagre"], default="auto")
             cmd.add_argument(
+                "--html-viewer",
+                choices=["classic", "experimental"],
+                default="classic",
+                help="HTML viewer: classic or experimental D3 architecture map",
+            )
+            cmd.add_argument(
                 "--html-node-shape",
                 choices=["bucketed", "square"],
                 help="Expandable card aspect ratios for HTML (default: bucketed; HTML only)",
@@ -277,6 +283,8 @@ def default_output(args, graph):
             parts.append("square")
         if args.format == "html" and args.html_view_mode == "isolated":
             parts.append("isolated")
+        if args.format == "html" and args.html_viewer == "experimental":
+            parts.append("experimental")
     return Path("archer") / ("-".join(filename_part(p) for p in parts) + "." + extension)
 
 
@@ -345,6 +353,12 @@ def run(args):
         emit(files("archer").joinpath("skills/archer/SKILL.md").read_text())
         return 0
     if args.command == "render":
+        if args.format != "html" and args.html_viewer != "classic":
+            raise ValueError("--html-viewer can only be used with --format html")
+        if args.html_viewer == "experimental" and (
+            args.html_node_shape is not None or args.html_view_mode is not None
+        ):
+            raise ValueError("--html-node-shape and --html-view-mode apply only to the classic HTML viewer")
         if args.format != "html" and args.html_node_shape is not None:
             raise ValueError("--html-node-shape can only be used with --format html")
         if args.format != "html" and args.html_view_mode is not None:
@@ -436,21 +450,29 @@ def run(args):
             with tempfile.TemporaryDirectory(prefix="archer-stdout-") as directory:
                 target = Path(directory) / ("output." + args.format) if output == Path("-") else output
                 if args.format == "html":
-                    from archer.render.html import render_html
+                    if args.html_viewer == "experimental":
+                        from archer.render.experimental import render_html
 
+                        viewer_options = {}
+                    else:
+                        from archer.render.html import render_html
+
+                        viewer_options = {
+                            "svg_optimization": args.svg_optimization,
+                            "node_shape": args.html_node_shape,
+                            "view_mode": args.html_view_mode,
+                        }
                     report = render_html(
                         graph,
                         target,
                         external=args.external,
                         layout=args.layout,
                         color_arrows=args.color_arrows,
-                        svg_optimization=args.svg_optimization,
                         exclude_arrows=args.exclude_arrows,
                         exclude_arrows_to=args.exclude_arrows_to,
                         exclude_arrows_from=args.exclude_arrows_from,
                         initializers=args.initializers,
-                        node_shape=args.html_node_shape,
-                        view_mode=args.html_view_mode,
+                        **viewer_options,
                     )
                 else:
                     report = render(
