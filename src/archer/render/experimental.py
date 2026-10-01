@@ -199,7 +199,9 @@ def _routes(svg):
     return result
 
 
-def layout_map(data, executable, directory, *, layout="auto", timeout=120, color_arrows=True):
+def layout_map(
+    data, executable, directory, *, layout="auto", timeout=120, color_arrows=True, map_layout="compact"
+):
     entities = data["entities"]
     owners = [i for i, e in entities.items() if e["children"]]
 
@@ -219,7 +221,9 @@ def layout_map(data, executable, directory, *, layout="auto", timeout=120, color
             child_layout = data["layouts"].get(child)
             if child_layout:
                 w, h = child_layout["bounds"][2:]
-                ratio = max(0.3, min(6, w / h))
+                # Keep reference cards readable at overview scale even when the
+                # embedded neighborhood is a very long directed flow.
+                ratio = max(0.8, min(2.4, w / h)) if map_layout == "reference" else max(0.3, min(6, w / h))
                 width = 440
                 height = max(180, round((width - 32) / ratio) + 72)
             else:
@@ -274,7 +278,7 @@ def layout_map(data, executable, directory, *, layout="auto", timeout=120, color
         # Include TALA's detours so camera fitting does not crop connectors.
         # Empty edge-free scenes still retain a modest, predictable margin.
         routes = _routes(svg)
-        compact = entity["kind"] in {"package", "root"} and len(nodes) > 2
+        compact = map_layout == "compact" and entity["kind"] in {"package", "root"} and len(nodes) > 2
         if compact:
             # TALA determines reference ordering; packages need readable regions
             # more than a long directed flow. Repack cards without changing order
@@ -338,6 +342,7 @@ def render_html(
     output,
     *,
     layout="auto",
+    map_layout="compact",
     timeout=120,
     color_arrows=True,
     external=False,
@@ -346,6 +351,8 @@ def render_html(
     exclude_arrows_to=(),
     exclude_arrows_from=(),
 ):
+    if map_layout not in {"compact", "reference"}:
+        raise ValueError("Experimental map layout must be compact or reference")
     executable = shutil.which("d2")
     if not executable:
         raise ValueError("Experimental HTML requires D2 0.9.0 for export-time layout")
@@ -360,9 +367,20 @@ def render_html(
     )
     with tempfile.TemporaryDirectory(prefix="archer-map-") as temporary:
         layout_map(
-            data, executable, Path(temporary), layout=layout, timeout=timeout, color_arrows=color_arrows
+            data,
+            executable,
+            Path(temporary),
+            layout=layout,
+            timeout=timeout,
+            color_arrows=color_arrows,
+            map_layout=map_layout,
         )
-    data["build"] = {"d2Version": version, "colorArrows": color_arrows, "layout": layout}
+    data["build"] = {
+        "d2Version": version,
+        "colorArrows": color_arrows,
+        "layout": layout,
+        "mapLayout": map_layout,
+    }
     assets = files("archer.render.assets").joinpath("experimental")
     page = assets.joinpath("viewer.html").read_text(encoding="utf-8")
     replacements = {
@@ -388,4 +406,5 @@ def render_html(
         "entities": len(data["entities"]) - 1,
         "bytes": output.stat().st_size,
         "layout": layout,
+        "mapLayout": map_layout,
     }

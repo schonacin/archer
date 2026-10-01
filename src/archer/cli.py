@@ -135,6 +135,11 @@ def parser():
                 help="HTML viewer: classic or experimental D3 architecture map",
             )
             cmd.add_argument(
+                "--html-map-layout",
+                choices=["compact", "reference"],
+                help="Experimental map placement: compact packages or reference engine geometry at every level",
+            )
+            cmd.add_argument(
                 "--html-node-shape",
                 choices=["bucketed", "square"],
                 help="Expandable card aspect ratios for HTML (default: bucketed; HTML only)",
@@ -285,6 +290,8 @@ def default_output(args, graph):
             parts.append("isolated")
         if args.format == "html" and args.html_viewer == "experimental":
             parts.append("experimental")
+            if args.html_map_layout == "reference":
+                parts.append("reference")
     return Path("archer") / ("-".join(filename_part(p) for p in parts) + "." + extension)
 
 
@@ -353,6 +360,8 @@ def run(args):
         emit(files("archer").joinpath("skills/archer/SKILL.md").read_text())
         return 0
     if args.command == "render":
+        if args.html_map_layout is not None and (args.format != "html" or args.html_viewer != "experimental"):
+            raise ValueError("--html-map-layout applies only to the experimental HTML viewer")
         if args.format != "html" and args.html_viewer != "classic":
             raise ValueError("--html-viewer can only be used with --format html")
         if args.html_viewer == "experimental" and (
@@ -453,7 +462,7 @@ def run(args):
                     if args.html_viewer == "experimental":
                         from archer.render.experimental import render_html
 
-                        viewer_options = {}
+                        viewer_options = {"map_layout": args.html_map_layout or "compact"}
                     else:
                         from archer.render.html import render_html
 

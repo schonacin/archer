@@ -66,6 +66,12 @@ def test_cli_setting_is_opt_in_and_has_a_distinct_default_filename(tmp_path, mon
         == 2
     )
     assert "classic HTML viewer" in capsys.readouterr().err
+    reference = parser().parse_args(
+        ["render", "--format", "html", "--html-viewer", "experimental", "--html-map-layout", "reference"]
+    )
+    assert default_output(reference, fixture_graph()).name.endswith("experimental-reference.html")
+    assert main(["render", "--format", "html", "--html-map-layout", "reference"]) == 2
+    assert "experimental HTML viewer" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(not shutil.which("d2"), reason="D2 is required for geometry export")
@@ -92,6 +98,33 @@ def test_actual_geometry_portable_export_and_empty_graph(tmp_path):
     empty = tmp_path / "empty.html"
     assert render_html(scan_sources({}), empty)["entities"] == 0
     assert '"bounds":[0,0,640,400]' in empty.read_text()
+
+
+@pytest.mark.skipif(not shutil.which("d2"), reason="D2 is required for geometry export")
+def test_reference_placement_retains_tala_at_every_hierarchy_level(tmp_path):
+    graph = fixture_graph()
+    output = tmp_path / "reference.html"
+    report = render_html(graph, output, layout="tala", map_layout="reference")
+    assert report["mapLayout"] == "reference"
+    data = json.loads(
+        re.search(
+            r'<script id="map-data" type="application/json">(.*?)</script>', output.read_text(), re.DOTALL
+        ).group(1)
+    )
+    assert data["build"]["mapLayout"] == "reference"
+    assert all(
+        scene["spacing"] == "reference" and scene["engine"] == "tala" for scene in data["layouts"].values()
+    )
+    assert len(data["layouts"]["pkg"]["nodes"]) == 3
+    assert data["layouts"]["pkg"]["edges"]
+    assert all(
+        path["transform"][0] > 0
+        for scene in data["layouts"].values()
+        for edge in scene["edges"]
+        for path in edge["paths"]
+    )
+    with pytest.raises(ValueError, match="compact or reference"):
+        render_html(graph, output, map_layout="unknown")
 
 
 @pytest.mark.skipif(not shutil.which("d2"), reason="D2 is required for geometry export")

@@ -13,6 +13,9 @@
   let allConnections = true, connectionStrength = .24, frame = 0, moving = false, hovered = null;
   let pinnedRegion = false, focusPoint = null, gesturePose = null;
   let candidate = null, candidateSince = 0, lastPaint = 0, semanticTimer = 0;
+  let connectionScale = null, scaleChangedAt = 0, frontierTimer = 0, frontierStarted = 0, panTimer = 0, frontierPending = false, lastPanAt = -Infinity;
+  let frontierFrom = new Map(), frontierTo = new Map(), outsideOpen = false, outsideSignature = "", gesturing = false;
+  const endpointIds = new Set(data.relationships.flatMap(edge => [edge.source, edge.target]));
   const metrics = { startedAt: performance.now(), usableAt: null, frames: [], paints: [], renderedNodes: 0 };
   window.__ARCHER_MAP_METRICS__ = metrics;
   function bounds() { return { w: $("canvas").clientWidth, h: $("canvas").clientHeight }; }
@@ -97,6 +100,7 @@
     current = entities[id].children.length ? id : (entities[id].parent || root);
     selected = id === root || (entities[id].children.length && !inspect) ? null : id;
     pinnedRegion = true; focusPoint = null;
+    outsideOpen = false;
     updateSidebar(); updateCrumbs();
     $("live").textContent = `Opened ${entities[id].name}`;
     applyCamera(fitTransform(regionRect(id)));
@@ -127,7 +131,7 @@
     if (next !== candidate) {
       candidate = next; candidateSince = performance.now();
       clearTimeout(semanticTimer); semanticTimer = setTimeout(requestPaint, 130);
-    } else if (performance.now() - candidateSince >= 110) {
+    } else if (performance.now() - candidateSince >= 110 && performance.now() - scaleChangedAt >= 120) {
       if (within(next, current)) remember(gesturePose || { camera, current, selected });
       current = next; gesturePose = { camera, current, selected }; candidate = null; updateCrumbs(); updateSidebar();
     }
@@ -143,32 +147,83 @@
       if (expansion > .01) visibleScene(id, opacity * expansion, nodes, size);
     }
   }
-  // Resolve canonical relationships against the readable frontier, independent of
-  // the current breadcrumb. Blend endpoints into children as their detail appears.
-  function resolvedEndpoint(id, nodeMap) {
-    let result = null;
-    for (const owner of ancestors(id)) {
-      let node = nodeMap.get(owner);
-      if (!node && positions.has(owner)) {
-        const r = screen(positions.get(owner)), parentNode = nodeMap.get(entities[owner].parent);
-        if (!intersects(r, bounds()) && parentNode && parentNode.expansion > .01)
-          node = { screen: r, opacity: parentNode.opacity * parentNode.expansion, external: true };
-      }
-      if (!node || node.screen.w < 62 || node.screen.h < 27) continue;
-      const r = node.screen, t = result ? ramp(node.opacity, .15, .85) : 1;
-      if (t <= 0) continue;
-      const prior = result ? result.rect : r;
-      result = { id: owner, external: node.external || false, rect: { x: prior.x + (r.x - prior.x) * t, y: prior.y + (r.y - prior.y) * t,
-        w: prior.w + (r.w - prior.w) * t, h: prior.h + (r.h - prior.h) * t } };
-    }
-    if (result) return result;
-    // An offscreen destination still has an honest, navigable boundary port.
+  // The relationship frontier depends on settled magnification, never on viewport
+  // intersection. Panning changes only the camera; offscreen entities keep their IDs.
+  function resolvedEndpoint(id, scale) {
+    let result = null, opacity = 1;
     for (const owner of ancestors(id).slice(1)) {
       const rect = positions.get(owner); if (!rect) continue;
-      const r = screen(rect);
-      if (r.w >= 62 && r.h >= 27) return { id: owner, rect: r, external: true };
+      if (rect.w * scale >= 62 && rect.h * scale >= 27) {
+        const t = result ? ramp(opacity, .15, .85) : 1;
+        if (t > 0) {
+          const prior = result ? result.rect : rect;
+          result = { id: owner, rect: blendRect(prior, rect, t) };
+        }
+      }
+      opacity *= entities[owner].children.length ? ramp(Math.min(rect.w, rect.h) * scale, 160, 310) : 1;
     }
-    return null;
+    return result;
+  }
+  function blendRect(a, b, t) {
+    return { x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t, w: a.w+(b.w-a.w)*t, h: a.h+(b.h-a.h)*t };
+  }
+  function frontierEndpoint(id, now) {
+    const target = frontierTo.get(id), prior = frontierFrom.get(id);
+    if (!target || !prior || reduced.matches) return target;
+    const t = ramp(now-frontierStarted, 0, 180);
+    return { id: target.id, rect: blendRect(prior.rect, target.rect, t) };
+  }
+  function lockFrontier() {
+    const now = performance.now(); lastPanAt = now;
+    if (frontierPending) { clearTimeout(frontierTimer); frontierTimer = setTimeout(requestPaint, 160); }
+    if (connectionScale === null || (connectionScale === camera.k && now-frontierStarted >= 180)) return;
+    frontierPending = true;
+    frontierTo = new Map([...endpointIds].map(id => [id, frontierEndpoint(id, now)]));
+    frontierFrom = frontierTo; frontierStarted = -Infinity; connectionScale = camera.k;
+    clearTimeout(frontierTimer); frontierTimer = setTimeout(requestPaint, 160);
+  }
+  function updateFrontier(now) {
+    if (connectionScale === null || (!moving && !gesturing && now-scaleChangedAt >= 120
+      && now-lastPanAt >= 120 && (connectionScale !== camera.k || frontierPending))) {
+      frontierFrom = new Map([...endpointIds].map(id => [id, frontierEndpoint(id, now)]));
+      connectionScale = camera.k; frontierStarted = now; frontierPending = false;
+      frontierTo = new Map([...endpointIds].map(id => [id, resolvedEndpoint(id, connectionScale)]));
+    }
+    if (!reduced.matches && now-frontierStarted < 180) requestPaint();
+  }
+  function outsideRelationships(owner) {
+    const grouped = new Map();
+    for (const relation of data.relationships) {
+      const sourceInside = within(relation.source, owner), targetInside = within(relation.target, owner);
+      if (sourceInside === targetInside) continue;
+      const id = sourceInside ? relation.target : relation.source;
+      if (within(id, current)) continue;
+      const item = grouped.get(id) || { id, outgoing: 0, incoming: 0 };
+      item[sourceInside ? "outgoing" : "incoming"] += relation.count; grouped.set(id, item);
+    }
+    return [...grouped.values()].sort((a,b) => (b.outgoing+b.incoming)-(a.outgoing+a.incoming) || a.id.localeCompare(b.id));
+  }
+  function updateOutside() {
+    const owner = selected || current;
+    const signature = `${current}|${owner}|${outsideOpen}|${!!selected}`;
+    if (signature === outsideSignature) return;
+    outsideSignature = signature;
+    const items = outsideRelationships(owner);
+    $("outside-toggle").hidden = !items.length;
+    $("outside-toggle").textContent = `Outside ${selected ? "selection" : "this region"} · ${items.length}`;
+    const expanded = items.length > 0 && outsideOpen;
+    $("outside-toggle").setAttribute("aria-expanded", expanded);
+    $("outside-panel").hidden = !expanded;
+    $("outside-title").textContent = selected ? `Connections outside ${entities[selected].label}` : `Connections outside ${entities[current].label}`;
+    $("outside-list").replaceChildren(...items.map(item => {
+      const button = entityButton(item.id,
+        [item.outgoing ? `Uses · ${item.outgoing}` : "", item.incoming ? `Used by · ${item.incoming}` : ""].filter(Boolean).join(" / "), id => navigate(id, true, true));
+      if (items.some(other => other.id !== item.id && entities[other.id].label === entities[item.id].label)) {
+        const e = entities[item.id];
+        button.querySelector("strong").textContent = `${entities[e.parent].label}.${e.label}`;
+      }
+      return button;
+    }));
   }
   function boundary(rect, toward) {
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
@@ -176,69 +231,86 @@
     const t = 1 / Math.max(Math.abs(dx) / Math.max(1, rect.w / 2), Math.abs(dy) / Math.max(1, rect.h / 2), 1e-9);
     return { x: cx + dx * t, y: cy + dy * t };
   }
-  function connectionsFor(nodes, size) {
-    const nodeMap = new Map(nodes.map(n => [n.id, n])), cache = new Map(), grouped = new Map();
-    const resolve = id => { if (!cache.has(id)) cache.set(id, resolvedEndpoint(id, nodeMap)); return cache.get(id); };
-    const relevant = selected || hovered;
+  // Preserve engine routes for sibling endpoints. During refinement, warp the
+  // reference path toward the interpolated endpoint cards; restore exact SVG
+  // geometry once settled. Camera translation never changes the route itself.
+  const referenceRoutes = new Map();
+  if (data.build.mapLayout === "reference") {
+    for (const [owner, layout] of Object.entries(data.layouts)) {
+      for (const edge of layout.edges) referenceRoutes.set(JSON.stringify([edge.source, edge.target]), { owner, paths: edge.paths });
+    }
+  }
+  function cachedRoute(path) {
+    if (path.geometry) return path.geometry;
+    const element = document.createElementNS("http://www.w3.org/2000/svg", "path"); element.setAttribute("d", path.d);
+    const length = element.getTotalLength();
+    const points = Array.from({ length: 49 }, (_, i) => {
+      const p = element.getPointAtLength(length * i / 48); return { x: p.x, y: p.y };
+    });
+    const last = element.getPointAtLength(length), before = element.getPointAtLength(Math.max(0,length-1));
+    path.geometry = { points, angle: Math.atan2(last.y-before.y,last.x-before.x)*180/Math.PI };
+    return path.geometry;
+  }
+  function referenceGeometry(edge, reference) {
+    const pose = placements.get(reference.owner);
+    const source = screen(positions.get(edge.source.id)), target = screen(positions.get(edge.target.id));
+    function same(a,b) { return ["x","y","w","h"].every(key => Math.abs(a[key]-b[key]) < .002); }
+    return reference.paths.map((path, index) => {
+      const geometry = cachedRoute(path), [scale, tx, ty] = path.transform;
+      const k = camera.k * pose.k * scale;
+      const x = camera.x+camera.k*(pose.x+pose.k*tx), y = camera.y+camera.k*(pose.y+pose.k*ty);
+      const points = geometry.points.map(p => ({ x:x+k*p.x, y:y+k*p.y }));
+      const first = points[0], last = points[points.length-1];
+      if (same(source,edge.source.rect) && same(target,edge.target.rect))
+        return { key:edge.key+":"+index, d:path.d, transform:`translate(${x},${y}) scale(${k})`, tip:last, angle:geometry.angle, routing:"reference" };
+      function anchor(p, original, rect) {
+        return { x:rect.x+(p.x-original.x)/original.w*rect.w, y:rect.y+(p.y-original.y)/original.h*rect.h };
+      }
+      const a = anchor(first, source, edge.source.rect), b = anchor(last, target, edge.target.rect);
+      const warped = points.map((p,i) => {
+        const t = i/(points.length-1);
+        return { x:p.x+(a.x-first.x)*(1-t)+(b.x-last.x)*t, y:p.y+(a.y-first.y)*(1-t)+(b.y-last.y)*t };
+      });
+      const tip = warped[warped.length-1], before = warped[warped.length-2];
+      return { key:edge.key+":"+index, d:warped.map((p,i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" "),
+        transform:null, tip, angle:Math.atan2(tip.y-before.y,tip.x-before.x)*180/Math.PI, routing:"blended" };
+    });
+  }
+  function connectionsFor(now) {
+    const cache = new Map(), grouped = new Map(), relevant = selected || hovered;
+    const resolve = id => {
+      if (!cache.has(id)) {
+        const endpoint = frontierEndpoint(id, now);
+        cache.set(id, endpoint ? { id: endpoint.id, rect: screen(endpoint.rect) } : null);
+      }
+      return cache.get(id);
+    };
     for (const relation of data.relationships) {
+      // The map shows the focused region's complete local structure. Outside
+      // dependencies are explicit in the dock, not stretched to viewport edges.
+      if (!within(relation.source, current) || !within(relation.target, current)) continue;
       const source = resolve(relation.source), target = resolve(relation.target);
-      if (!source || !target || source.id === target.id || (source.external && target.external)) continue;
-      // Containment is shown by nesting, never by dependency arrows.
+      if (!source || !target || source.id === target.id) continue;
       if (within(source.id, target.id) || within(target.id, source.id)) continue;
       const active = relevant && (within(relation.source, relevant) || within(relation.target, relevant));
       if (!active && (!allConnections || connectionStrength === 0)) continue;
       const key = JSON.stringify([source.id, target.id]);
       let edge = grouped.get(key);
-      if (!edge) { edge = { key, source, target, active: false, count: 0, kinds: new Set() }; grouped.set(key, edge); }
-      edge.active ||= !!active; edge.count += relation.count; edge.kinds.add(relation.kind);
+      if (!edge) { edge = { key, source, target, active: false, count: 0 }; grouped.set(key, edge); }
+      edge.active ||= !!active; edge.count += relation.count;
     }
-    const ports = new Map(), edges = [];
-    function clipped(point, endpoint, other, active) {
-      const margin = 42, bottom = size.h - 82;
-      if (!endpoint.external && point.x >= margin && point.x <= size.w-margin && point.y >= 72 && point.y <= bottom) return point;
-      const cx = clamp(other.x, margin, size.w-margin), cy = clamp(other.y, 72, bottom);
-      const dx = point.x-cx, dy = point.y-cy;
-      let t = 1;
-      if (dx > 0) t = Math.min(t, (size.w-margin-cx)/dx);
-      if (dx < 0) t = Math.min(t, (margin-cx)/dx);
-      if (dy > 0) t = Math.min(t, (bottom-cy)/dy);
-      if (dy < 0) t = Math.min(t, (72-cy)/dy);
-      const result = { x: clamp(cx+dx*t, margin, size.w-margin), y: clamp(cy+dy*t, 72, bottom) };
-      if (!ports.has(endpoint.id)) ports.set(endpoint.id, { ...result, id: endpoint.id, active });
-      else ports.get(endpoint.id).active ||= active;
-      return result;
-    }
+    const edges = [];
     for (const edge of grouped.values()) {
+      const reference = referenceRoutes.get(edge.key);
+      if (reference) {
+        for (const route of referenceGeometry(edge, reference)) edges.push({ ...edge, ...route,
+          color:edge.active ? "#087f75" : (data.build.colorArrows ? entities[edge.source.id].color : "#64748b"),
+          opacity:edge.active ? .92 : connectionStrength*(relevant ? .5 : 1), cross:false });
+        continue;
+      }
       const sr = edge.source.rect, tr = edge.target.rect;
       const sc = { x: sr.x+sr.w/2, y: sr.y+sr.h/2 }, tc = { x: tr.x+tr.w/2, y: tr.y+tr.h/2 };
-      let a = boundary(sr, tc), b = boundary(tr, sc);
-      a = clipped(a, edge.source, tc, edge.active); b = clipped(b, edge.target, sc, edge.active);
-      edge.a = a; edge.b = b;
-    }
-    // Keep boundary names readable and reserve one landing point per outside region.
-    const rails = { left: [], right: [], top: [], bottom: [] };
-    for (const port of ports.values()) {
-      const distances = { left: Math.abs(port.x-42), right: Math.abs(port.x-(size.w-42)), top: Math.abs(port.y-72), bottom: Math.abs(port.y-(size.h-82)) };
-      const side = Object.keys(distances).sort((a,b) => distances[a]-distances[b])[0];
-      rails[side].push(port);
-    }
-    for (const [side, entries] of Object.entries(rails)) {
-      const vertical = side === "left" || side === "right", axis = vertical ? "y" : "x";
-      const lo = vertical ? 110 : 92, hi = vertical ? size.h-104 : size.w-92;
-      const gap = Math.min(vertical ? 32 : 154, (hi-lo)/Math.max(1,entries.length-1));
-      entries.sort((a,b) => a[axis]-b[axis] || a.id.localeCompare(b.id));
-      entries.forEach((port,index) => {
-        port[axis] = clamp(port[axis], lo+index*gap, hi-(entries.length-index-1)*gap);
-        if (index) port[axis] = Math.max(port[axis], entries[index-1][axis]+gap);
-        if (vertical) port.x = side === "left" ? 82 : size.w-82;
-        else port.y = side === "top" ? 72 : size.h-82;
-      });
-    }
-    for (const edge of grouped.values()) {
-      let a = edge.a, b = edge.b;
-      const portRect = port => ({ x: port.x-72, y: port.y-12, w: 144, h: 24 });
-      if (ports.has(edge.source.id)) a = boundary(portRect(ports.get(edge.source.id)), b);
-      if (ports.has(edge.target.id)) b = boundary(portRect(ports.get(edge.target.id)), a);
+      const a = boundary(sr, tc), b = boundary(tr, sc);
       if (Math.hypot(a.x-b.x, a.y-b.y) < 8) continue;
       const dx = b.x-a.x, dy = b.y-a.y, bend = Math.min(90, Math.hypot(dx,dy)*.24);
       const horizontal = Math.abs(dx) >= Math.abs(dy);
@@ -246,10 +318,11 @@
       const c2 = horizontal ? { x: b.x-Math.sign(dx)*bend, y: b.y } : { x: b.x, y: b.y-Math.sign(dy)*bend };
       edges.push({ ...edge, d: `M${a.x},${a.y}C${c1.x},${c1.y} ${c2.x},${c2.y} ${b.x},${b.y}`,
         tip: b, angle: Math.atan2(b.y-c2.y,b.x-c2.x)*180/Math.PI,
-        color: edge.active ? "#087f75" : (data.build.colorArrows ? entities[edge.source.id].color : "#64748b"), opacity: edge.active ? .92 : connectionStrength * (relevant ? .5 : 1),
-        cross: edge.source.external || edge.target.external || entities[edge.source.id].parent !== entities[edge.target.id].parent });
+        color: edge.active ? "#087f75" : (data.build.colorArrows ? entities[edge.source.id].color : "#64748b"),
+        opacity: edge.active ? .92 : connectionStrength * (relevant ? .5 : 1),
+        cross: entities[edge.source.id].parent !== entities[edge.target.id].parent });
     }
-    return { edges: edges.sort((a,b) => Number(a.active)-Number(b.active)), ports: [...ports.values()] };
+    return edges.sort((a,b) => Number(a.active)-Number(b.active));
   }
   function requestPaint() { if (!frame) frame = requestAnimationFrame(paint); }
   function paint(time) {
@@ -257,7 +330,9 @@
     if (lastPaint && time - lastPaint < 120) { metrics.frames.push(time - lastPaint); if (metrics.frames.length > 240) metrics.frames.shift(); }
     lastPaint = time; chooseRegion(size);
     const nodes = []; visibleScene(root, 1, nodes, size);
-    const { edges, ports } = connectionsFor(nodes, size);
+    updateFrontier(performance.now());
+    const edges = connectionsFor(performance.now());
+    updateOutside();
     world.attr("transform", camera.toString());
     // Paint containment backgrounds first, routes second, and labels above both.
     world.selectAll("path.node-card").data(nodes, d => d.id).join("path")
@@ -268,12 +343,12 @@
       .attr("opacity", d => d.opacity).attr("role", "button").attr("aria-label", d => d.entity.name)
       .on("click", (event, d) => { event.stopPropagation(); select(d.id); })
       .on("dblclick", (event, d) => { event.preventDefault(); event.stopPropagation(); navigate(d.id); })
-      .on("mouseenter", (_, d) => { hovered = d.id; requestPaint(); })
+      .on("mouseenter", (_, d) => { if (!gesturing) { hovered = d.id; requestPaint(); } })
       .on("mouseleave", () => { hovered = null; requestPaint(); }).order();
     labels.selectAll("path.edge-route").data(edges, d => d.key).join("path").attr("class", "edge-route")
       .attr("data-source", d => d.source.id).attr("data-target", d => d.target.id)
-      .attr("data-count", d => d.count).attr("data-active", d => d.active)
-      .attr("d", d => d.d).attr("stroke", d => d.color).attr("stroke-width", d => d.active ? 2 : 1.2)
+      .attr("data-count", d => d.count).attr("data-active", d => d.active).attr("data-routing", d => d.routing || "dynamic")
+      .attr("d", d => d.d).attr("transform", d => d.transform || null).attr("stroke", d => d.color).attr("stroke-width", d => d.active ? 2 : 1.2)
       .attr("stroke-dasharray", d => d.cross ? "5 4" : null).attr("opacity", d => d.opacity).order();
     labels.selectAll("path.edge-head").data(edges, d => d.key).join("path")
       .attr("class", "edge-head").attr("d", "M -6 -3 L 0 0 L -6 3")
@@ -297,18 +372,6 @@
       .text(d => truncate(d.entity.label, Math.floor((d.screen.w - 43) / 6.4)));
     groups.select("text.meta").attr("x", 20).attr("y", 16).attr("font-size", 10).attr("fill", "#7a8c97")
       .text(d => d.screen.h > 52 ? `${kindLabel(d.entity)}${d.entity.children.length ? ` · ${d.entity.children.length} inside` : ""}` : "");
-    const portGroups = labels.selectAll("g.boundary-port").data(ports, d => d.id).join(enter => {
-      const group = enter.append("g").attr("class", "boundary-port").attr("role", "button").attr("tabindex", 0);
-      group.append("rect").attr("rx", 5); group.append("text"); group.append("title"); return group;
-    }).attr("transform", d => `translate(${clamp(d.x, 82, size.w-82)},${d.y})`)
-      .attr("data-entity", d => d.id).attr("aria-label", d => `Follow ${entities[d.id].name}`)
-      .on("click", (event,d) => { event.stopPropagation(); navigate(d.id, true, true); })
-      .on("keydown", (event,d) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); navigate(d.id, true, true); } }).order();
-    portGroups.select("rect").attr("x", -72).attr("y", -12).attr("width", 144).attr("height", 24)
-      .attr("fill", "#fff").attr("stroke", d => d.active ? "#087f75" : "#c8d3dc");
-    portGroups.select("text").attr("text-anchor", "middle").attr("y", 4).attr("font-size", 10)
-      .attr("fill", d => d.active ? "#087f75" : "#526676").text(d => `${icon(entities[d.id])} ${truncate(entities[d.id].label, 19)}`);
-    portGroups.select("title").text(d => entities[d.id].name);
     metrics.renderedNodes = nodes.length;
     metrics.paints.push(performance.now() - started); if (metrics.paints.length > 240) metrics.paints.shift();
     $("zoom-value").textContent = `${Math.round(camera.k / fitTransform(regionRect(current)).k * 100)}%`;
@@ -331,7 +394,7 @@
     button.addEventListener("keydown", event => { if (event.key === "Enter" && !onClick) { event.preventDefault(); navigate(id); } });
     return button;
   }
-  function select(id) { selected = id; updateSidebar(); requestPaint(); }
+  function select(id) { selected = id; outsideOpen = false; updateSidebar(); requestPaint(); }
   for (const edge of data.relationships) {
     if (!incoming.has(edge.target)) incoming.set(edge.target, []);
     if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
@@ -370,7 +433,7 @@
     $("used-by").setAttribute("aria-pressed", relationDirection === "in");
     const items = relationDirection === "out" ? uses : usedBy;
     $("relationships").replaceChildren(...items.map(item => entityButton(item.id,
-      `${entities[item.id].name} · ${[...item.kinds].join(", ")}`, id => navigate(id, true, true))));
+      `${within(item.id, current) ? "" : "Outside · "}${entities[item.id].name} · ${[...item.kinds].join(", ")}`, id => navigate(id, true, true))));
     if (!items.length) {
       const p = document.createElement("p"); p.className = "relationship-note";
       p.textContent = `No ${relationDirection === "out" ? "outgoing" : "incoming"} relationships in this scan.`;
@@ -402,7 +465,7 @@
       .attr("width", size.w / camera.k * miniScale).attr("height", size.h / camera.k * miniScale);
   }
   $("minimap").addEventListener("click", event => {
-    const rect = $("minimap").getBoundingClientRect(), size = bounds(); remember();
+    const rect = $("minimap").getBoundingClientRect(), size = bounds(); remember(); lockFrontier(); pinnedRegion = true; candidate = null; focusPoint = null;
     const x = ((event.clientX - rect.left) * 180 / rect.width - miniX) / miniScale;
     const y = ((event.clientY - rect.top) * 110 / rect.height - miniY) / miniScale;
     applyCamera(d3.zoomIdentity.translate(size.w / 2 - camera.k * x, size.h / 2 - camera.k * y).scale(camera.k), 300);
@@ -412,21 +475,29 @@
     .filter(event => event.type === "wheel" ? !panWheel(event) : event.type !== "dblclick" && !event.button)
     .wheelDelta(event => -clamp(event.deltaY, -160, 160) * (event.deltaMode === 1 ? .03 : .002) * (event.ctrlKey ? 4 : 1))
     .on("start.map", event => { if (event.sourceEvent) {
-      gesturePose = { camera, current, selected }; svg.interrupt(); moving = false;
+      gesturePose = { camera, current, selected }; svg.interrupt(); moving = false; gesturing = true; hovered = null;
     } })
     .on("zoom.map", event => {
+      const changedScale = Math.abs(Math.log(event.transform.k / camera.k)) > 1e-10;
       camera = event.transform;
+      if (changedScale) {
+        scaleChangedAt = performance.now(); clearTimeout(frontierTimer);
+        frontierTimer = setTimeout(requestPaint, 140);
+      }
       if (event.sourceEvent) {
-        pinnedRegion = false;
+        pinnedRegion = !changedScale;
+        if (!changedScale) { candidate = null; lockFrontier(); }
         const input = event.sourceEvent, rect = svg.node().getBoundingClientRect();
         focusPoint = input.type === "wheel" ? { x: input.clientX - rect.left, y: input.clientY - rect.top } : null;
       }
       requestPaint();
-    });
+    }).on("end.map", () => { gesturing = false; requestPaint(); });
   svg.call(zoom).on("dblclick.zoom", null);
   svg.node().addEventListener("wheel", event => {
-    if (!panWheel(event)) return; event.preventDefault(); svg.interrupt(); moving = false; pinnedRegion = false; focusPoint = null;
+    if (!panWheel(event)) return; event.preventDefault(); lockFrontier(); svg.interrupt(); moving = false; pinnedRegion = true; candidate = null; focusPoint = null;
     svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x - event.deltaX, camera.y - event.deltaY).scale(camera.k));
+    hovered = null; gesturing = true; clearTimeout(panTimer);
+    panTimer = setTimeout(() => { gesturing = false; requestPaint(); }, 160);
   }, { passive: false });
   svg.on("click.clear", event => { if (event.target === svg.node()) { selected = null; updateSidebar(); requestPaint(); } });
   function relativeZoom(factor) { pinnedRegion = false; focusPoint = null; svg.interrupt(); svg.transition().duration(reduced.matches ? 0 : 140).call(zoom.scaleBy, factor); }
@@ -446,6 +517,16 @@
     $("connections").querySelector("span").textContent = allConnections ? "on" : "off";
     requestPaint();
   });
+  $("outside-toggle").onclick = () => {
+    outsideOpen = !outsideOpen;
+    if (outsideOpen) {
+      document.body.classList.remove("panel-hidden"); $("panel-toggle").setAttribute("aria-expanded", true);
+    }
+    updateOutside();
+    if (outsideOpen) $("outside-panel").scrollIntoView({ block: "nearest" });
+    requestPaint();
+  };
+  $("outside-close").onclick = () => { outsideOpen = false; requestPaint(); };
   $("uses").onclick = () => { relationDirection = "out"; updateSidebar(); };
   $("used-by").onclick = () => { relationDirection = "in"; updateSidebar(); };
   $("search").addEventListener("input", event => {
@@ -471,7 +552,7 @@
     else if (event.key === "ArrowLeft" && event.altKey) { event.preventDefault(); goBack(); }
     else if (["+", "=", "-"].includes(event.key)) { event.preventDefault(); relativeZoom(event.key === "-" ? 1 / 1.35 : 1.35); }
     else if (event.key.startsWith("Arrow")) {
-      event.preventDefault(); svg.interrupt(); pinnedRegion = false; focusPoint = null;
+      event.preventDefault(); svg.interrupt(); lockFrontier(); hovered = null; pinnedRegion = true; candidate = null; focusPoint = null;
       const dx = event.key === "ArrowLeft" ? 55 : event.key === "ArrowRight" ? -55 : 0;
       const dy = event.key === "ArrowUp" ? 55 : event.key === "ArrowDown" ? -55 : 0;
       svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x + dx, camera.y + dy).scale(camera.k));
@@ -483,7 +564,7 @@
   if (matchMedia("(max-width:720px)").matches) { document.body.classList.add("panel-hidden"); $("panel-toggle").setAttribute("aria-expanded", false); }
   let previousSize = bounds();
   new ResizeObserver(() => {
-    const size = bounds(); svg.interrupt();
+    const size = bounds(); svg.interrupt(); lockFrontier(); pinnedRegion = true; candidate = null;
     if (previousSize.w && previousSize.h) svg.call(zoom.transform,
       d3.zoomIdentity.translate(camera.x + (size.w - previousSize.w) / 2,
         camera.y + (size.h - previousSize.h) / 2).scale(camera.k));
@@ -503,5 +584,6 @@
   $("overview").onclick = () => navigate(home); $("brand").onclick = event => { event.preventDefault(); navigate(home); };
   zoom.scaleExtent([fitTransform(rootRect).k * .2, 1e12]); svg.call(zoom.transform, initial); requestPaint();
   window.__ARCHER_MAP_STATE__ = () => ({ current, selected, camera: { k: camera.k, x: camera.x, y: camera.y },
-    visible: [...document.querySelectorAll(".node-card")].map(n => n.dataset.entity), history: history.length });
+    visible: [...document.querySelectorAll(".node-card")].map(n => n.dataset.entity), history: history.length,
+    connectionScale, frontier: [...frontierTo].map(([id, endpoint]) => [id, endpoint ? endpoint.id : null]) });
 })();

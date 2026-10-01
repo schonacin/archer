@@ -18,7 +18,7 @@ def artifact(tmp_path_factory):
     graph = scan_sources(
         {
             "pkg/__init__.py": "from .service import run\ndef entry(): return run()\n",
-            "pkg/service.py": "from .model import Model\ndef run(): return Model().work()\ndef helper(): pass\n",
+            "pkg/service.py": "from .model import Model\ndef run(): helper(); return Model().work()\ndef helper(): pass\n",
             "pkg/model.py": "class Model:\n def work(self):\n  def inner(): return 1\n  return inner()\n",
         }
     )
@@ -28,7 +28,7 @@ def artifact(tmp_path_factory):
 
 
 @pytest.fixture
-def page(artifact):
+def page(request, artifact):
     executable = shutil.which("chromium") or shutil.which("google-chrome")
     if not executable:
         cached = next((Path.home() / ".cache/ms-playwright").glob("chromium-*/chrome-linux-*/chrome"), None)
@@ -42,7 +42,12 @@ def page(artifact):
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("request", lambda request: requests.append(request.url))
         # Exercise the exact standalone bytes without file:// enterprise policies.
-        page.set_content(artifact)
+        html = (
+            request.getfixturevalue("reference_artifact")
+            if getattr(request, "param", None) == "reference"
+            else artifact
+        )
+        page.set_content(html)
         page.wait_for_function("window.__ARCHER_MAP_METRICS__.usableAt !== null")
         yield page
         assert not errors
@@ -57,7 +62,7 @@ def state(page):
 def find(page, name):
     page.locator("#search").fill(name)
     page.locator(f'#search-results button[data-entity="{name}"]').click()
-    page.wait_for_timeout(550)
+    page.wait_for_timeout(800)
 
 
 def test_function_modules_dependency_jump_and_exact_history(page):
@@ -208,20 +213,160 @@ def test_entity_types_and_connection_strength_preserve_selection(page):
     assert page.locator('.edge-route[data-active="false"]').count() == 0
 
 
-def test_cross_hierarchy_endpoints_refine_and_boundary_ports_navigate(page):
-    initial = page.locator(".edge-route").evaluate_all(
-        "es => es.map(e => [e.dataset.source,e.dataset.target])"
-    )
-    assert any(target == "pkg.model.Model" for _, target in initial)
-    assert not any(target == "pkg.model.Model.work" for _, target in initial)
+def test_cross_hierarchy_endpoints_refine_and_outside_panel_navigates(page):
+    initial = dict(state(page)["frontier"])
+    assert initial["pkg.model.Model.work"] == "pkg.model.Model"
+    assert page.locator(".boundary-port").count() == 0
     find(page, "pkg.model.Model")
-    detailed = page.locator(".edge-route").evaluate_all(
-        "es => es.map(e => [e.dataset.source,e.dataset.target])"
-    )
-    assert any(target == "pkg.model.Model.work" for _, target in detailed)
-    port = page.locator('.boundary-port[data-entity="pkg.service"]')
-    assert port.count() == 1
-    port.click()
-    page.wait_for_timeout(550)
+    detailed = dict(state(page)["frontier"])
+    assert detailed["pkg.model.Model.work"] == "pkg.model.Model.work"
+    assert page.locator("#outside-panel").is_hidden()
+    page.locator("#outside-toggle").click()
+    page.locator("#outside-panel").wait_for(state="visible")
+    page.locator('#outside-list button[data-entity="pkg.service.run"]').click()
+    page.wait_for_timeout(800)
     assert state(page)["current"] == "pkg.service"
-    assert state(page)["selected"] == "pkg.service"
+    assert state(page)["selected"] == "pkg.service.run"
+    assert page.locator("#outside-panel").is_hidden()
+    assert "Outside" in page.locator('#relationships button[data-entity="pkg.model.Model.work"]').inner_text()
+    page.locator("#outside-toggle").click()
+    page.locator("#outside-panel").wait_for(state="visible")
+    assert page.locator('#outside-list button[data-entity="pkg.model.Model.work"]').count() == 1
+    assert page.locator('#outside-list button[data-entity="pkg.service.helper"]').count() == 0
+    page.locator("#outside-close").click()
+    page.wait_for_timeout(100)
+    assert page.locator("#outside-panel").is_hidden()
+    assert state(page)["selected"] == "pkg.service.run"
+
+
+def test_pan_preserves_region_frontier_and_arrow_geometry(page):
+    find(page, "pkg")
+    page.mouse.move(10, 170)
+    snapshot = """() => [...document.querySelectorAll('.edge-route')].map(e => {
+      const length=e.getTotalLength();
+      return {key:JSON.stringify([e.dataset.source,e.dataset.target]),
+        points:[0,length/2,length].map(t => {const p=e.getPointAtLength(t);return [p.x,p.y];})};
+    })"""
+    page.wait_for_timeout(100)
+    before_state = state(page)
+    before = sorted(page.evaluate(snapshot), key=lambda e: e["key"])
+    assert before
+    page.mouse.wheel(650, 180)
+    page.wait_for_timeout(400)
+    after_state = state(page)
+    after = sorted(page.evaluate(snapshot), key=lambda e: e["key"])
+    assert after_state["current"] == before_state["current"]
+    assert after_state["frontier"] == before_state["frontier"]
+    assert [e["key"] for e in after] == [e["key"] for e in before]
+    for old, new in zip(before, after):
+        for old_point, new_point in zip(old["points"], new["points"]):
+            assert new_point == pytest.approx([old_point[0] - 650, old_point[1] - 180], abs=0.02)
+    assert page.locator(".boundary-port").count() == 0
+
+
+def test_zoom_defers_frontier_change_until_gesture_settles(page):
+    find(page, "pkg")
+    before = state(page)["connectionScale"]
+    page.mouse.move(10, 170)
+    for _ in range(3):
+        page.mouse.wheel(0, -120)
+        page.wait_for_timeout(35)
+    assert state(page)["connectionScale"] == before
+    page.wait_for_timeout(500)
+    assert state(page)["connectionScale"] == pytest.approx(state(page)["camera"]["k"])
+    assert state(page)["connectionScale"] > before
+
+
+def test_pan_interrupts_pending_zoom_then_refinement_resumes_when_idle(page):
+    find(page, "pkg")
+    page.mouse.move(10, 170)
+    page.mouse.wheel(0, -120)
+    page.wait_for_timeout(50)
+    page.mouse.wheel(30, 10)
+    before = state(page)["frontier"]
+    for _ in range(5):
+        page.mouse.wheel(30, 10)
+        page.wait_for_timeout(40)
+        assert state(page)["frontier"] == before
+    page.wait_for_timeout(550)
+    assert state(page)["connectionScale"] == pytest.approx(state(page)["camera"]["k"])
+
+
+def test_native_drag_preserves_region_and_magnification(page):
+    find(page, "pkg.service")
+    page.mouse.move(10, 170)
+    before = state(page)
+    page.mouse.down()
+    page.mouse.move(230, 250, steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(250)
+    after = state(page)
+    assert after["current"] == before["current"]
+    assert after["frontier"] == before["frontier"]
+    assert after["camera"]["k"] == before["camera"]["k"]
+    assert after["camera"]["x"] == pytest.approx(before["camera"]["x"] + 220)
+    assert after["camera"]["y"] == pytest.approx(before["camera"]["y"] + 80)
+
+
+@pytest.fixture(scope="module")
+def reference_artifact(tmp_path_factory):
+    if not shutil.which("d2"):
+        pytest.skip("D2 is required for map export")
+    graph = scan_sources(
+        {
+            "pkg/__init__.py": "from .service import run\ndef entry(): return run()\n",
+            "pkg/service.py": "from .model import Model\ndef run(): helper(); return Model().work()\ndef helper(): pass\n",
+            "pkg/model.py": "class Model:\n def work(self):\n  def inner(): return 1\n  return inner()\n",
+        }
+    )
+    path = tmp_path_factory.mktemp("reference-map") / "reference.html"
+    render_html(graph, path, layout="tala", map_layout="reference")
+    return path.read_text()
+
+
+@pytest.mark.parametrize("page", ["reference"], indirect=True)
+def test_reference_routes_are_exact_and_translate_with_native_pan(page):
+    page.wait_for_timeout(400)
+    assert page.locator('.edge-route[data-routing="reference"]').count() > 0
+    assert page.evaluate("""() => {
+      const data=JSON.parse(document.querySelector('#map-data').textContent);
+      const paths=new Map(Object.values(data.layouts).flatMap(l => l.edges.map(e => [JSON.stringify([e.source,e.target]),e.paths.map(p => p.d)])));
+      return [...document.querySelectorAll('.edge-route[data-routing="reference"]')].every(e =>
+        paths.get(JSON.stringify([e.dataset.source,e.dataset.target])).includes(e.getAttribute('d')));
+    }""")
+    snapshot = """() => [...document.querySelectorAll('.edge-route')].map(e => {
+      const p=e.getPointAtLength(e.getTotalLength()).matrixTransform(e.getCTM());
+      return {key:JSON.stringify([e.dataset.source,e.dataset.target]),d:e.getAttribute('d'),point:[p.x,p.y]};
+    })"""
+    page.mouse.move(10, 170)
+    page.wait_for_timeout(100)
+    before = sorted(page.evaluate(snapshot), key=lambda e: e["key"])
+    region = state(page)["current"]
+    page.mouse.wheel(450, 130)
+    page.wait_for_timeout(300)
+    after = sorted(page.evaluate(snapshot), key=lambda e: e["key"])
+    assert state(page)["current"] == region
+    assert [e["d"] for e in after] == [e["d"] for e in before]
+    for old, new in zip(before, after):
+        assert new["point"] == pytest.approx([old["point"][0] - 450, old["point"][1] - 130], abs=0.02)
+
+
+@pytest.mark.parametrize("page", ["reference"], indirect=True)
+def test_reference_navigation_selection_and_zoom_interruption(page):
+    find(page, "pkg.service")
+    assert page.locator('.edge-route[data-routing="reference"]').count() > 0
+    page.locator('#children button[data-entity="pkg.service.run"]').click()
+    page.wait_for_timeout(100)
+    assert page.locator('.edge-route[data-active="true"]').count() > 0
+    page.locator('#relationships button[data-entity="pkg.model.Model.work"]').click()
+    page.wait_for_timeout(850)
+    assert state(page)["selected"] == "pkg.model.Model.work"
+    page.mouse.move(10, 170)
+    page.mouse.wheel(0, -120)
+    page.wait_for_timeout(50)
+    page.mouse.wheel(40, 20)
+    page.wait_for_timeout(500)
+    assert state(page)["camera"]["k"] > 0
+    assert page.evaluate(
+        "[...document.querySelectorAll('.edge-route')].every(e => !/NaN|Infinity/.test(e.getAttribute('d')))"
+    )

@@ -11,6 +11,19 @@ file in a browser. D3 7.9.0 and all geometry are bundled; the artifact makes no
 network requests. D2 is needed at export time, not when exploring the file.
 `--layout auto` also works and uses the existing layout fallback policy.
 
+To compare with TALA positioning at every hierarchy level:
+
+```sh
+archer render --format html --html-viewer experimental --html-map-layout reference --layout tala
+```
+
+This writes `archer/architecture-explorer-experimental-reference.html`. The default
+`--html-map-layout compact` remains available for the denser package overview.
+Reference mode retains engine positions for packages and the repository root as
+well as modules, classes and functions. Expandable card proportions are bounded
+before layout to avoid very long child flows creating unreadable overview towers.
+Geometry stays fixed while exploring; layout runs only during export.
+
 The classic viewer remains the default. Its exporter and assets are unchanged.
 The experimental exporter lives in `src/archer/render/experimental.py`; its HTML,
 CSS, JavaScript, vendored D3 and license are under `render/assets/experimental/`.
@@ -41,11 +54,15 @@ rejected when combined with the experimental setting.
   even at zero. Selecting an entity also dims unrelated connections. Connections
   toggles background arrows without losing the slider setting.
 - Arrows aggregate canonical relationships at the currently readable hierarchy
-  frontier. As child details appear, endpoints blend from the parent into its
-  children, allowing a module-level destination to resolve into a class or method.
-  Dashed arrows connect different ownership regions. Offscreen destinations use
-  named boundary ports; clicking a port navigates to that region. The inspector
-  retains the exact canonical destinations and can follow them directly.
+  frontier within the focused region. After zoom settles for 120 ms, endpoints
+  blend into the new frontier over 180 ms. The frontier depends on magnification,
+  not viewport intersection: dragging, trackpad panning and keyboard panning keep
+  endpoint identities, geometry and the current region stable.
+- Outside connections are summarized by a quiet "Outside this region" control.
+  It opens a list in the explorer with exact destinations and Uses / Used by
+  counts. Selecting an entity scopes the count to its outside connections, which
+  are also marked in the normal inspector. These links navigate directly and Back
+  restores context. There are no floating boundary tags or viewport-anchored rays.
 - The minimap preserves the larger context and can reposition the camera.
 - Reduced-motion preferences remove animated camera travel while retaining
   direct zoom and hierarchical detail.
@@ -62,13 +79,16 @@ exporter lays out each ownership neighborhood bottom-up using D2, extracts node
 bounds and normalized connector paths through the existing validated adapter,
 and writes structured map data. Finished D2 SVGs are not embedded in the viewer.
 
-Modules, classes and functions preserve the reference node layout. Packages with
-several children use compact, consistently sized cards, ordered from their
-reference layout. Reference connector routes remain in the exported data, but
-the interactive viewer generates curves from canonical relationships so arrows
-can cross regions and resolve into children. These curves are not obstacle-
-avoiding routes; dense graphs can still have crossings. Lowering Strength keeps
-the overview quieter without hiding selected relationships.
+Modules, classes and functions preserve the reference node layout. In compact
+mode, packages with several children use consistently sized cards ordered from
+their reference layout, and the browser generates curves from canonical
+relationships. Reference mode keeps the original engine geometry everywhere,
+including its connector paths for sibling endpoints. During hierarchy refinement,
+sampled reference paths follow the interpolated cards; settled endpoints restore
+the exact engine path. Connections spanning different ownership neighborhoods
+still use generated curves, which do not avoid obstacles. Connections outside
+the focus remain navigable in the explorer. Dense graphs can still have crossings;
+lowering Strength keeps the overview quieter without hiding selected relationships.
 
 The browser embeds each neighborhood into its parent card once. One D3 camera
 navigates these fixed coordinates. Child details fade in according to projected
@@ -87,12 +107,16 @@ render command never downloads dependencies.
 `tests/test_experimental_render.py` checks ownership, initializer grouping,
 relationship filtering, route coordinate normalization, escaping, isolated CLI
 selection and portable output. `tests/browser/test_experimental_map.py` exercises
-actual Chromium navigation, visual entity types, connection strength, endpoint
-refinement and boundary navigation, function-only modules, dependency jumps and precise
+actual Chromium navigation, visual entity types, connection strength, settled
+endpoint refinement, stable pan geometry and outside navigation, function-only
+modules, dependency jumps and precise
 history restoration, wheel descent/ascent, trackpad panning, touch pinch, keyboard
 navigation, interruption, resize and reduced motion. Browser checks require
 Playwright plus a Chromium executable; they load the standalone bytes with
 `set_content` so enterprise `file://` policies do not interfere.
+
+Reference mode also has checks for engine placement at every level, preservation
+of exact connector paths, stable routed panning, selection and interrupted zoom.
 
 The viewer exposes bounded `__ARCHER_MAP_METRICS__` samples for paint duration and
 frame intervals, and a read-only `__ARCHER_MAP_STATE__()` snapshot for browser

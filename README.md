@@ -170,6 +170,7 @@ Without a mode, `diff` and `--changes` use `HEAD` → working tree. Worktree sna
 | `--format d2\|svg\|png\|pdf\|html` | Output format; default `svg`. |
 | `--layout auto\|tala\|elk\|dagre` | D2 layout engine; default `auto`. |
 | `--html-viewer classic\|experimental` | HTML viewer; default `classic`. Experimental uses a separate offline D3 architecture map. |
+| `--html-map-layout compact\|reference` | Experimental viewer only: compact package cards (default), or engine placement at every hierarchy level. Use `reference` with `--layout tala` for an all-TALA map. |
 | `--html-node-shape bucketed\|square` | Expandable-card aspect ratios for HTML; default `bucketed`. HTML only. |
 | `--html-view-mode standard\|isolated` | Use the standard three-level scenes or locally encapsulated detail scenes; default `standard`. HTML only. |
 | `--external` | Include external and unresolved nodes in projected views. Full views already include them. |
